@@ -1,7 +1,7 @@
 "use strict";
 import {log} from "console";
 import {createCanvas} from "@napi-rs/canvas";
-import {WIDTH, HEIGHT, visual} from "./anim.js";
+import {WIDTH, HEIGHT, visual} from "../anim.js";
 
 const canvas = createCanvas(WIDTH, HEIGHT);
 const ctx = canvas.getContext("2d");
