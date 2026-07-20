@@ -24,14 +24,16 @@ This file is a shared task-board. When editing:
 - [x] Rich text styling option
 - [x] Background color
 - [x] Draw circles
+- [x] Circles id
 - [ ] Chunk text generation
   - [ ] Break symbol `;`
 - [ ] Balanced text wrapping
-- [ ] Math equation wrapping `$`
-  - [ ] Look for a font bolder than `Times New Roman`
+- [ ] Exponentiation wrapping `$`
+- [ ] Group linear vertical paragraph
 - [ ] Escape bar `\`
 - [ ] Draw lines
 - [ ] Fixed duration text
+- [ ] Support special characters
 
 ### E/Ideas
 
@@ -42,11 +44,14 @@ This file is a shared task-board. When editing:
 - Text moving effect
 - Code blocks with font `monospace`
 - Bullet lists
+- Math equation wrapping `$`
 
 ## Code
 
 - [x] Replace arg array by plain object
 - [x] Review and improve `setText`
 - [x] Move FPS setting to `anim.js`
+- [x] Module script for text parser
+- [x] Remove trailing spaces at end of each line
 - [ ] Request frame option
 - [ ] Testable from `anim.js`

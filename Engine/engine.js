@@ -101,8 +101,8 @@ export const Engine = {
         textConfig[key] += value;
     },
 
-    newCircle(posX, posY) {
-        visual.push({type: "circle", posX: posX, posY: posY, start: time});
+    newCircle(id, posX, posY) {
+        visual.push({type: "circle", id: id, posX: posX, posY: posY, start: time});
     },
 
     newText(newProp) {
