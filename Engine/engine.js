@@ -1,7 +1,6 @@
 "use strict";
 import {log} from "console";
 import {
-    tokenizeRichText,
     getSegmentsWidth,
     wrapRichTextSegments
 } from "./textParser.js";
@@ -11,17 +10,21 @@ const audio = [];
 
 const textConfig = {
     id: 0,
+
     text: "Hello, world!",
+    fontSize: 64,
+    fontColor: "#FFFFFF",
+    fontFamily: "Arial",
+    fontWeight: 400,
+
     posX: 0,
     posY: 0,
-    fontSize: 64,
-    fontFamily: "Arial",
-    fontColor: "#FFFFFF",
-    fontWeight: 400,
     maxWidth: 960,
     autoSetPosY: true,
+
     effect: false,
     richText: false,
+    segmentedText: false
 };
 
 const textProp = {};
@@ -42,39 +45,47 @@ function getGroupCenter(id) {
     return (minHeight + maxHeight) / 2;
 }
 
-function pushTextSegments(prop, segments, linePosX, linePosY) {
+function pushTextSegment(prop, seg, posX, posY) {
+    visual.push({
+        type: "text",
+        id: prop.id,
+        text: seg.text,
+        posX,
+        posY,
+        fontFamily: prop.fontFamily,
+        fontSize: prop.fontSize,
+        fontColor: prop.fontColor,
+        fontWeight: seg.bold ? 700 : prop.fontWeight,
+        effect: prop.effect,
+        start: time
+    });
+}
+
+function pushTextLine(prop, segments, linePosY) {
     // If parsing removed everything (edge-case), throw an error.
     if (segments.length === 0)
-        throw new Error("Rich text cannot contain nothing but formatting characters.");
+        throw new Error("Text lines must have at least one segment.");
 
     // Measure widths per segment so we can preserve centered alignment.
     const [totalWidth, segWidths] = getSegmentsWidth(prop, segments);
 
-    // render.js draws at: WIDTH/2 + obj.posX, with ctx.textAlign="center"
-    // So each segment's posX should represent its own center offset within the line.
-    let cumWidth = 0;
+    let currWidth = 0;
     for (let i = 0; i < segments.length; i++) {
         const seg = segments[i];
-        const segWidth = segWidths[i];
 
-        const segCenterOffset = cumWidth + segWidth / 2 - totalWidth / 2;
-        const segPosX = linePosX + segCenterOffset;
+        if (typeof seg === "object") {
+            const segWidth = segWidths[i];
 
-        visual.push({
-            type: "text",
-            id: prop.id,
-            text: seg.text,
-            posX: segPosX,
-            posY: linePosY,
-            fontFamily: prop.fontFamily,
-            fontSize: prop.fontSize,
-            fontColor: prop.fontColor,
-            fontWeight: seg.bold ? 700 : prop.fontWeight,
-            effect: prop.effect,
-            start: time
-        });
+            const segCenterOffset = currWidth + segWidth / 2 - totalWidth / 2;
+            const segPosX = prop.posX + segCenterOffset;
 
-        cumWidth += segWidth;
+            pushTextSegment(prop, seg, segPosX, linePosY);
+
+            currWidth += segWidth;
+        } else {
+            time += 2;
+            Engine.sound("Sounds/click.wav", 4);
+        }
     }
 }
 
@@ -108,13 +119,16 @@ export const Engine = {
     newText(newProp) {
         const prop = {...textConfig, ...newProp};
 
-        // Rich text: wrap while preserving bold state across line breaks.
-        const wrapped = wrapRichTextSegments(prop, textConfig);
+        // Wrap while preserving bold state across line breaks.
+        const lines = wrapRichTextSegments(prop, textConfig);
 
-        for (let i = 0; i < wrapped.lines.length; i++) {
-            const lineSegments = wrapped.lines[i];
-            const y = wrapped.lineYForIndex(i);
-            pushTextSegments(prop, lineSegments, wrapped.linePosX, y);
+        let posY = prop.posY;
+        if (!prop.autoSetPosY) posY -= totalHeight / 2;
+
+        for (let i = 0; i < lines.length; i++) {
+            const lineSegments = lines[i];
+            pushTextLine(prop, lineSegments, posY);
+            posY += prop.fontSize;
         }
 
         textProp[prop.id] = prop;

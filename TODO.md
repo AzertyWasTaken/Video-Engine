@@ -25,8 +25,8 @@ This file is a shared task-board. When editing:
 - [x] Background color
 - [x] Draw circles
 - [x] Circles id
-- [ ] Chunk text generation
-  - [ ] Break symbol `;`
+- [x] Chunk text generation (with symbol `;`)
+- [ ] Option for auto text duration
 - [ ] Balanced text wrapping
 - [ ] Exponentiation wrapping `$`
 - [ ] Group linear vertical paragraph

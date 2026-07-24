@@ -32,7 +32,10 @@ export function tokenizeRichText(text) {
 
 export function getSegmentsWidth(prop, segments) {
     let totalWidth = 0;
+
     const segWidths = segments.map((seg) => {
+        if (typeof seg !== "object") return 0;
+
         const weight = seg.bold ? 700 : prop.fontWeight;
         ctx.font = `${weight} ${prop.fontSize}px ${prop.fontFamily}`;
         const w = ctx.measureText(seg.text).width;
@@ -49,8 +52,7 @@ function measureChunkWidth(chunk, prop) {
     return ctx.measureText(chunk.text).width;
 }
 
-// Flatten tokens into a stream of chars, tracking bold.
-// Spaces are included at the end of each word.
+// Flatten tokens into a stream of words and spaces.
 function chunkTokens(tokens) {
     const chunks = [];
 
@@ -112,15 +114,27 @@ export function wrapRichTextSegments(prop, textConfig) {
     const lines = splitLines(chunks, prop);
     const totalHeight = (lines.length - 1) * prop.fontSize;
 
-    if (prop.autoSetPosY) {
+    if (prop.autoSetPosY)
         textConfig.posY += totalHeight + prop.fontSize;
+
+    return prop.segmentedText
+    ? lines.map(segTextLine)
+    : lines;
+}
+
+export function segTextLine(line) {
+    const result = [];
+
+    for (const seg of line) {
+        const split = seg.text.split(";");
+
+        for (let i = 0; i < split.length; i++) {
+            if (i > 0) result.push("wait");
+
+            if (split[i].length > 0)
+                result.push({text: split[i], bold: seg.bold});
+        }
     }
 
-    const lineYForIndex = (idx) => {
-        let y = prop.posY + idx * prop.fontSize;
-        if (!prop.autoSetPosY) y -= totalHeight / 2;
-        return y;
-    };
-
-    return {lines, lineYForIndex, linePosX: prop.posX};
+    return result;
 }
