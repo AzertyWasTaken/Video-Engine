@@ -1,12 +1,19 @@
 "use strict";
-import {log} from "console";
 import {createCanvas} from "@napi-rs/canvas";
-import {WIDTH, HEIGHT, visual} from "../anim.js";
 
-const canvas = createCanvas(WIDTH, HEIGHT);
-const ctx = canvas.getContext("2d");
+let ctx, width, height;
 
-export function render(t) {
+export function setCanvas(WIDTH, HEIGHT) {
+    const canvas = createCanvas(WIDTH, HEIGHT);
+    ctx = canvas.getContext("2d");
+    width = WIDTH;
+    height = HEIGHT;
+}
+
+export function render(visual, t) {
+    if (!width || !height || !ctx)
+        throw new Error("Missing canvas property");
+
     const objects = visual.filter((obj) =>
         t >= obj.start && t < (obj.end ?? Infinity)
     );
@@ -16,7 +23,7 @@ export function render(t) {
     );
 
     ctx.fillStyle = background ? background.color : "#000000";
-    ctx.fillRect(0, 0, WIDTH, HEIGHT);
+    ctx.fillRect(0, 0, width, height);
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -30,15 +37,15 @@ export function render(t) {
             }
 
             ctx.font = `${obj.fontWeight} ${obj.fontSize}px ${obj.fontFamily}`;
-            ctx.fillText(obj.text, WIDTH / 2 + obj.posX, HEIGHT / 2 + obj.posY);
+            ctx.fillText(obj.text, width / 2 + obj.posX, height / 2 + obj.posY);
         }
         else if (obj.type === "circle") {
             ctx.beginPath();
-            ctx.arc(WIDTH / 2 + obj.posX, HEIGHT / 2 + obj.posY, 40, 0, 2 * Math.PI);
+            ctx.arc(width / 2 + obj.posX, height / 2 + obj.posY, 40, 0, 2 * Math.PI);
             ctx.fillStyle = "#FFFFFF";
             ctx.fill();
         }
     }
 
-    return ctx.getImageData(0, 0, WIDTH, HEIGHT);
+    return ctx.getImageData(0, 0, width, height);
 }

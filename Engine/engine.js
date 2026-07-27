@@ -1,5 +1,4 @@
 "use strict";
-import {log} from "console";
 import {
     getSegmentsWidth,
     wrapRichTextSegments
@@ -12,31 +11,35 @@ const textConfig = {
     id: 0,
 
     text: "Hello, world!",
-    fontSize: 64,
+    fontSize: 80,
     fontColor: "#FFFFFF",
     fontFamily: "Arial",
     fontWeight: 400,
 
     posX: 0,
     posY: 0,
-    maxWidth: 960,
-    autoSetPosY: true,
+    alignY: 0,
+    maxWidth: Infinity,
 
-    effect: false,
     richText: false,
-    segmentedText: false
+    segmentedText: false,
+    effect: false,
+
+    autoSetPosY: false,
+    onTextSegment: () => {},
 };
 
 const textProp = {};
 
 let time = 0;
+let textLength = 0;
 
 function getGroupCenter(id) {
     let minHeight = 0;
     let maxHeight = 0;
 
     visual.forEach((value) => {
-        if (value.id === id) {
+        if (id.has(value.id)) {
             minHeight = Math.min(minHeight, value.posY);
             maxHeight = Math.max(maxHeight, value.posY);
         }
@@ -74,6 +77,7 @@ function pushTextLine(prop, segments, linePosY) {
         const seg = segments[i];
 
         if (typeof seg === "object") {
+            textLength += seg.text.length;
             const segWidth = segWidths[i];
 
             const segCenterOffset = currWidth + segWidth / 2 - totalWidth / 2;
@@ -83,8 +87,8 @@ function pushTextLine(prop, segments, linePosY) {
 
             currWidth += segWidth;
         } else {
-            time += 2;
-            Engine.sound("Sounds/click.wav", 4);
+            prop.onTextSegment(textLength);
+            textLength = 0;
         }
     }
 }
@@ -113,37 +117,61 @@ export const Engine = {
     },
 
     newCircle(id, posX, posY) {
-        visual.push({type: "circle", id: id, posX: posX, posY: posY, start: time});
+        visual.push({
+            type: "circle",
+            id: id,
+            posX:
+            posX,
+            posY: posY,
+            start: time
+        });
     },
 
     newText(newProp) {
         const prop = {...textConfig, ...newProp};
+        textLength = 0;
 
         // Wrap while preserving bold state across line breaks.
         const lines = wrapRichTextSegments(prop, textConfig);
+        const lineHeight = prop.fontSize;
+        const totalHeight = lines.length * lineHeight;
 
-        let posY = prop.posY;
-        if (!prop.autoSetPosY) posY -= totalHeight / 2;
+        // Get y-position at the center of the text
+        let posY = prop.posY - totalHeight / 2 + lineHeight / 2;
+        // Adjust y-position depending of `prop.alignY`
+        posY += totalHeight * prop.alignY / 2;
+
+        if (prop.autoSetPosY) textConfig.posY += totalHeight;
 
         for (let i = 0; i < lines.length; i++) {
             const lineSegments = lines[i];
             pushTextLine(prop, lineSegments, posY);
-            posY += prop.fontSize;
+            posY += lineHeight;
         }
 
         textProp[prop.id] = prop;
+        prop.onTextSegment(textLength);
+        textLength = 0;
     },
 
     setText(id, text) {
         this.clear(id);
-        this.newText({...textProp[id], text});
+        this.newText({
+            ...textProp[id],
+            text,
+            effect: false,
+            autoSetPosY: false,
+            textDelay: () => 0
+        });
     },
 
     centerText(id, posY = 0) {
+        if (typeof id !== "object") id = new Set([id]);
+
         const center = getGroupCenter(id);
 
         visual.forEach((value) => {
-            if (value.id === id) {
+            if (id.has(value.id)) {
                 value.posY += posY - center;
             }
         });

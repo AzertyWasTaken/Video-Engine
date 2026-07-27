@@ -1,5 +1,4 @@
 "use strict";
-import {log} from "console";
 import {createCanvas} from "@napi-rs/canvas";
 
 const canvas = createCanvas(1, 1);
@@ -104,7 +103,7 @@ function splitLines(chunks, prop) {
 
 // Wrap while preserving bold state across line breaks.
 // This must match the vertical positioning behavior of getWrappedTextPos().
-export function wrapRichTextSegments(prop, textConfig) {
+export function wrapRichTextSegments(prop) {
     // Build word/space chunks with bold state preserved.
     const tokens = prop.richText
     ? tokenizeRichText(prop.text)
@@ -112,10 +111,6 @@ export function wrapRichTextSegments(prop, textConfig) {
 
     const chunks = chunkTokens(tokens);
     const lines = splitLines(chunks, prop);
-    const totalHeight = (lines.length - 1) * prop.fontSize;
-
-    if (prop.autoSetPosY)
-        textConfig.posY += totalHeight + prop.fontSize;
 
     return prop.segmentedText
     ? lines.map(segTextLine)

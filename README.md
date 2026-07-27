@@ -1,79 +1,176 @@
 # Videos
 
-This folder contains a small Node.js/Canvas + FFmpeg pipeline to generate simple animated videos.
+This folder contains a Node.js/Canvas + FFmpeg pipeline to generate animated math videos with rich text, audio, and custom effects.
 
-## What it does
+## What each module does
 
-- `anim.js`: Builds timelines defining the animation content and exports:
-  - `width`, `height`, `duration` (total timeline length in seconds)
-  - `visual timeline`: Text events (with `start`/`end` times)
-  - `audio timeline`: Sound events (each with a `sound` filename and `start` time)
-- :`render.js`: Renders a single frame image `ImageData` (PNG-like pixel buffer) for a given time `t`.
-- :`record.js`: Uses FFmpeg to encode `numbers.mp4` by writing raw RGBA frames to stdin.
-- `addSounds.js`: Uses FFmpeg `filter_complex` to `adelay` each sound and `amix` them.
-- `thumbnail.js`: Generates a `thumbnail.png` preview (if you run it).
-- `Sounds/`: Audio assets referenced by `anim.js` via `_.sound`.
+### Animation scripts (`anim_*.js`)
+
+Each `anim_*.js` file is a self-contained entry point that:
+
+1. Creates a timeline using the `Engine` API (from `Engine/engine.js`)
+2. Calls `record(CONFIG, visual, duration)` to encode `visual.mp4`
+3. Optionally calls `addSounds(audio, duration)` to produce `audio.mp4`
+
+### `Engine/engine.js`
+
+Exports the `Engine` object (aliased `_` in animation scripts), which maintains a global `time` cursor and accumulates `visual` and `audio` arrays.
+
+### `Engine/textParser.js`
+
+Handles rich text tokenization (`*bold*` markup), width measurement, line wrapping, and segment splitting (`;` for timed text chunks).
+
+### `Engine/render.js`
+
+Takes the visual timeline and a time `t`, draws all active objects to a Canvas, and returns `ImageData`.
+
+### `Engine/record.js`
+
+Spawns FFmpeg, writes consecutive RGBA frames (at `CONFIG.FPS`) to stdin, and produces `visual.mp4`.
+
+### `Engine/addSounds.js`
+
+Takes the audio timeline, delays each sound file via FFmpeg `adelay`, mixes them with `amix`, and produces `audio.mp4`.
+
+## Engine API
+
+The `Engine` object is the core timeline builder. All methods modify a global state.
+
+### Time management
+
+```js
+_.wait(sec) // Advance the time cursor by `sec` seconds
+_.getDuration() // → total elapsed time
+```
+
+### Text
+
+```js
+_.newText(textConfig); // Add a text event at the current time cursor
+_.setText(id, text) // Replace text of an existing id (clears old, creates new)
+_.setProp({...}) // Set default properties for subsequent newText calls
+_.changeProp(key, n) // Increment/decrement a default property (e.g. "posY", 80)
+```
+
+### Rich text markup
+
+When `richText: true`, the text is parsed for `*bold*` markers:
+
+- `*bold text*` renders with `fontWeight: 700`
+- Non-starred segments use the configured `fontWeight`
+- Asterisks are consumed and not rendered
+
+### Segmented text
+
+When `segmentedText: true`, each line is split by `;` into timed chunks. The `onTextSegment` callback fires after each chunk, typically used to play a click sound and wait:
+
+```js
+onTextSegment: (textLength) => {
+  _.sound("Sounds/click.wav", 2);
+  _.wait(Math.floor(textLength / 12 + 2) / 2);
+}
+```
+
+### Visuals
+
+```js
+_.setBackgroundColor("#101020")   // Set background at current time
+_.newCircle(id, posX, posY)       // Add a circle at (posX, posY) from center
+_.clear(id)                       // End all active events with matching id
+_.centerText(idSet, posY)         // Vertically center a group of ids around posY
+```
+
+### Timeline access
+
+```js
+_.getVisualTimeline()  // → visual events array
+_.getAudioTimeline()   // → audio events array
+_.getDuration()        // → total seconds
+```
+
+### Sound
+
+```js
+_.sound("Sounds/click.wav", volume) // Schedule a sound at the current time cursor
+```
 
 ## Time model (important)
 
-`anim.js` advances a `time` cursor using:
+The `Engine` maintains a monotonically increasing `time` cursor. Everything is positioned relative to this cursor.
 
-- `_.wait(sec)` to increase the current time
-- `_.text({...})` to add one or more visual events at the current `time`
-- `_.sound(path)` to add an audio event with `start: time`
-- `_.clear(id)` to set an event’s `end` time (so visuals stop when cleared)
+```js
+_.wait(2) // time = 2
+_.newText({...}) // text event starts at time = 2
+_.wait(1) // time = 3
+_.sound("Sounds/click.wav") // audio event starts at time = 3
+_.clear(id) // text event ends at time = 3
+```
 
-`render.js` draws events where:
+**Rendering rule** (in `render.js`): an event is drawn when `t >= event.start && t < (event.end ?? Infinity)`.
 
-- `t >= event.start`
-- `t < (event.end ?? Infinity)`
+**Recording rule** (in `record.js`): samples `FPS * duration` frames at `t = f / FPS`.
 
-`record.js` samples frames at a fixed FPS:
+## Text rendering pipeline
 
-- `fps = 1`
-- `totalFrames = fps * duration`
+1. Input text string
+2. `tokenizeRichText()` — parse **bold** markers → token array [{text, bold}, ...]
+3. `chunkTokens()` — split tokens into word/space chunks
+4. `splitLines()` — measure widths, wrap at maxWidth → lines of chunks
+5. `segTextLine()` — split chunks at ; (if segmentedText) → ["wait", {text, bold}, ...]
+6. `pushTextLine()` — measure each segment, compute x-positions, push visual events
+7. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
+
+### Size hierarchy
+
+- **Character** — atomic unit
+- **Word** — contiguous non-space characters
+- **Line** — wrapped words; removed trailing space
+- **Paragraph** — all lines from one `newText` call
+- **Section** — group of paragraphs sharing an id (ended by `clear`)
 
 ## Requirements
 
-- **Node.js** (ES modules are used: `"type": "module"`)
-- Dependency: `@napi-rs/canvas`
-- **FFmpeg** installed at the expected path used by scripts:
-  - `C:/Programs/ffmpeg/bin/ffmpeg.exe`
+- **Node.js 18+** (ES modules: `"type": "module"`)
+- **npm dependency**: `@napi-rs/canvas` (install via `npm install`)
+- **FFmpeg** installed at:
+  - `C:/ffmpeg/bin/ffmpeg.exe`
 
-If your FFmpeg path differs, update `ffmpegPath` in:
-
-- `record.js`
-- `addSounds.js`
+  If your FFmpeg path differs:
+  - In `Engine/record.js`: update the `ffmpegPath` constant
+  - In `Engine/addSounds.js`: set `FFMPEG_PATH` environment variable, or update the default fallback
 
 ## Setup & run
 
-From this folder:
+From the `Videos/` folder:
 
 ```bash
 npm install
-node record.js
-node addSounds.js
+node anim_equation.js
 ```
 
-Outputs:
+This produces:
 
-- `numbers.mp4` (generated by `record.js`)
-- `final.mp4` (generated by `addSounds.js`, with audio)
+- `visual.mp4` — video-only output (no audio)
+- `audio.mp4` — final video with mixed & delayed audio
 
-Optional:
+### Creating a new animation
 
-```bash
-node thumbnail.js
-```
+1. Copy `anim_equation.js` as a starting template.
+2. Import `Engine as _` from `"./Engine/engine.js"`.
+3. Set `CONFIG` (width, height, FPS).
+4. Build the timeline with `_.newText`, `_.wait`, `_.sound`, etc.
+5. Call `await record(CONFIG, visual, duration)` and `addSounds(audio, duration)`.
 
-## Sound files
-
-Audio files are stored in `Videos/Sounds/` and are referenced by filename in `anim.js` (e.g. `click.wav`).
-
-`addSounds.js` resolves sound paths relative to the `Videos/` directory’s `Sounds/` folder.
+---
 
 ## Troubleshooting
 
-- **“Missing sounds directory” / missing video file logs**: ensure you ran `node record.js` first and that `Videos/Sounds/` exists.
-- **FFmpeg not found**: update `ffmpegPath` constants in the scripts.
-- **Unexpected audio timing**: audio `start` is based on the `time` cursor in `anim.js` (including all `_.wait(...)` calls).
+| Symptom | Likely fix |
+| - | - |
+| `visual.mp4` not found | Run `node anim_equation.js` first (not `node record.js` directly) |
+| FFmpeg not found | Check `ffmpegPath` in `Engine/record.js` (default: `C:/ffmpeg/bin/ffmpeg.exe`) |
+| Missing audio in output | Ensure `addSounds(audio, duration)` is uncommented in the animation script |
+| Audio events out of sync | Audio `start` depends on the `time` cursor (includes all `_.wait()` calls) |
+| Text not wrapping | Set `maxWidth` via `_.setProp({maxWidth: 960})` before calling `_.newText` |
+| Bold not rendering | Enable `richText: true` in `_.setProp()` or the `newText` call |
+| "Missing audio file" errors | Place `.wav`/`.mp3` files in the correct folder and reference relative to `Videos/` |
