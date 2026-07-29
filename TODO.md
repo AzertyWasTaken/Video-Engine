@@ -1,42 +1,44 @@
 # TODO
 
-<!-- AGENT-SAFE START -->
-This file is a shared task-board. When editing:
+## Update log
 
-- Add new items
-- Update checkboxes/status lines
-- Do NOT delete headings or existing bullet ideas
-<!-- AGENT-SAFE END -->
-
-## Engine
-
-- [x] Multiline text
-- [x] Text font
-- [x] Text color
-- [x] Add sound in timeline function `engine.js`
-- [x] Add sounds from timeline to video
-- [x] Color newly spawned text effect
-- [x] Automatic text gap (depends of text length)
-- [x] Automatic text duration
-- [x] Automatic text group center
-- [x] Bold text
-- [x] Bold wrapping `*`
+- [x] Multiline text wrapping
+- [x] Text font option
+- [x] Text color option
+- [x] Play sound function
 - [x] Rich text styling option
 - [x] Background color
 - [x] Draw circles
-- [x] Circles id
 - [x] Chunk text generation (with symbol `;`)
-- [ ] Option for auto text duration
-- [ ] Balanced text wrapping
+- [x] Multi-id center text
+- [x] Custom function for when text segments appear (for waiting and sounds)
+- [x] Better align text `posY` option (integer)
+- [x] Videos runnable from `anim.js`
+- [x] Improve `TODO.md`
+- [x] Review `README.md`
+- [x] Rename `addSounds.js` variables and functions
+
+## Engine
+
+- [ ] Balanced width text wrapping
 - [ ] Exponentiation wrapping `$`
 - [ ] Group linear vertical paragraph
-- [ ] Escape bar `\`
+- [ ] Rich text escape bar `\`
 - [ ] Draw lines
 - [ ] Fixed duration text
 - [ ] Support special characters
 
-### E/Ideas
+## Code
 
+N/A
+
+## Documentation
+
+N/A
+
+## Ideas
+
+- Request single frame option
 - Optimize `visual.filter` time performances
 - Gradient background
 - Text typing effect
@@ -45,13 +47,3 @@ This file is a shared task-board. When editing:
 - Code blocks with font `monospace`
 - Bullet lists
 - Math equation wrapping `$`
-
-## Code
-
-- [x] Replace arg array by plain object
-- [x] Review and improve `setText`
-- [x] Move FPS setting to `anim.js`
-- [x] Module script for text parser
-- [x] Remove trailing spaces at end of each line
-- [ ] Request frame option
-- [ ] Testable from `anim.js`

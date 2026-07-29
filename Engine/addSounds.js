@@ -4,70 +4,75 @@ import fs from "fs";
 import path from "path";
 import {fileURLToPath} from "url";
 
-const ffmpegPath = process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe";
-const scriptPath = fileURLToPath(import.meta.url);
-const videosDir = path.dirname(path.dirname(scriptPath));
-
-const videoFile = path.join(videosDir, "visual.mp4");
-const outputFile = path.join(videosDir, "audio.mp4");
+const ffmpegExecutablePath = process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe";
+const scriptFilePath = fileURLToPath(import.meta.url);
 
 // If no valid audio events, just remux the video.
-function remuxVideo() {
-    const args = [
+function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
+    const ffmpegArgs = [
         "-y",
-        "-i", videoFile,
+        "-i", videoFilePath,
         "-c:v", "copy",
         "-c:a", "aac",
-        outputFile
+        outputFilePath
     ];
 
     console.log("Processing (no audio events)...");
-    execFileSync(ffmpegPath, args, {stdio: "inherit"});
+    execFileSync(ffmpegExecutablePath, ffmpegArgs, {stdio: "inherit"});
 
     console.log("Completed");
     process.exit(0);
 }
 
 // Build filter_complex by creating one delayed stream per *valid* audio event.
-// Use the same `events` ordering for both: (1) filter input indices and (2) `-i` inputs.
-function buildFilter(events) {
-    const filterParts = [];
-    const mixInputs = [];
+// Use the same `audioEvents` ordering for both: (1) filter input indices and (2) `-i` inputs.
+function buildAudioFilterComplex(audioEvents) {
+    const filterPartStrings = [];
+    const mixInputLabels = [];
 
-    for (let i = 0; i < events.length; i++) {
-        const obj = events[i];
-        const startMs = Math.max(0, Math.floor((obj.start ?? 0) * 1000));
+    for (let i = 0; i < audioEvents.length; i++) {
+        const audioEvent = audioEvents[i];
+        const startDelayMs = Math.max(0, Math.floor((audioEvent.start ?? 0) * 1000));
 
-        // Inputs: 0 = video, then 1..N = each audio file (same events index order)
-        const inputIndex = i + 1;
-        const outLabel = `a${i}`;
+        // Inputs: 0 = video, then 1..N = each audio file (same audioEvents index order)
+        const audioInputIndex = i + 1;
+        const outputLabel = `a${i}`;
 
         // adelay expects a channel delay list; :all=1 applies same delay to all channels.
-        filterParts.push(`[${inputIndex}:a]adelay=${startMs}:all=1,volume=${obj.volume ?? 1}[${outLabel}]`);
-        mixInputs.push(`[${outLabel}]`);
+        filterPartStrings.push(`[${audioInputIndex}:a]adelay=${startDelayMs}:all=1,volume=${audioEvent.volume ?? 1}[${outputLabel}]`);
+        mixInputLabels.push(`[${outputLabel}]`);
     }
 
-    return [filterParts, mixInputs];
+    return [filterPartStrings, mixInputLabels];
 }
 
 // Always output an [audio] label (ffmpeg -map "[audio]" depends on it).
-function getAmix(mixInputs, videoDurationExpr) {
-    return videoDurationExpr
-    ? `${mixInputs.join("")}amix=inputs=${mixInputs.length}:duration=longest:dropout_transition=0:normalize=0,atrim=0:${videoDurationExpr},asetpts=PTS-STARTPTS[audio]`
-    : `${mixInputs.join("")}amix=inputs=${mixInputs.length}:duration=longest:dropout_transition=0:normalize=0[audio]`;
+function buildAmixFilter(mixInputLabels, videoDuration) {
+    const durationString = videoDuration !== null ? String(videoDuration) : null;
+
+    // Mix with "duration = longest" so all delayed events are heard.
+    const mixInputs = mixInputLabels.join("");
+    const inputCount = mixInputLabels.length;
+    const amixBase = `${mixInputs}amix=inputs=${inputCount}:duration=longest:dropout_transition=0:normalize=0`;
+
+    // If we know the duration, trim the final mix to the video duration via "atrim".
+    if (durationString)
+        return `${amixBase},atrim=0:${durationString},asetpts=PTS-STARTPTS[audio]`;
+
+    return `${amixBase}[audio]`;
 }
 
-function getSoundPath(sound) {
-    if (typeof sound !== "string") {
+function resolveSoundFilePath(soundName, videoDirectory) {
+    if (typeof soundName !== "string") {
         throw new TypeError(
-            `addSounds.js: Invalid sound value — expected a string, got ${typeof sound}. ` +
-            `Value: ${JSON.stringify(sound)}`
+            `addSounds.js: Invalid sound value — expected a string, got ${typeof soundName}. ` +
+            `Value: ${JSON.stringify(soundName)}`
         );
     }
 
     // If the caller provided an absolute or relative path, resolve relative to script dir.
-    if (sound.startsWith("./") || sound.includes("/")) {
-        const resolved = path.isAbsolute(sound) ? sound : path.join(videosDir, sound);
+    if (soundName.startsWith("./") || soundName.includes("/")) {
+        const resolved = path.isAbsolute(soundName) ? soundName : path.join(videoDirectory, soundName);
         if (!fs.existsSync(resolved)) {
             throw new Error(
                 `addSounds.js: Missing audio file at resolved path: ${resolved}`
@@ -76,79 +81,74 @@ function getSoundPath(sound) {
         return resolved;
     }
 
-    // Bare filename (no directory separator): try videosDir.
-    const directPath = path.join(videosDir, sound);
-    if (fs.existsSync(directPath)) return directPath;
+    // Bare filename (no directory separator): try videoDir.
+    const directSoundPath = path.join(videoDirectory, soundName);
+    if (fs.existsSync(directSoundPath)) return directSoundPath;
 
     throw new Error(
-        `addSounds.js: Missing audio file "${sound}". ` +
-        `Looked in: ${directPath}`
+        `addSounds.js: Missing audio file "${soundName}". ` +
+        `Looked in: ${directSoundPath}`
     );
 }
 
-function getArgs(events, filter) {
-    const args = ["-y", "-i", videoFile];
-
-    // Add one -i per audio event that has a sound path (same ordering as `events` above).
-    for (const obj of events) {
+function appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex, videoDirectory) {
+    // Add one -i per audio event that has a sound path (same ordering as `audioEvents` above).
+    for (const audioEvent of audioEvents) {
         // Resolve relative to this script so execution cwd doesn't matter.
-        const sound = obj.sound;
-        const soundPath = getSoundPath(sound);
+        const soundName = audioEvent.sound;
+        const resolvedSoundPath = resolveSoundFilePath(soundName, videoDirectory);
 
-        if (!fs.existsSync(soundPath)) {
-            const base = typeof sound === "string" ? path.basename(sound) : String(sound);
-            const hint = `Hint: if you're referencing "${base}" try putting it under "${path.join(videosDir, "Sounds")}".`;
-
+        if (!fs.existsSync(resolvedSoundPath)) {
             throw new Error(
-                `addSounds.js: Missing audio file for event: sound="${sound}".\n` +
-                `Resolved path: ${soundPath}\n` +
-                `${hint}`
+                `addSounds.js: Missing audio file for event: sound="${soundName}".\n` +
+                `Resolved path: ${resolvedSoundPath}`
             );
         }
 
-        args.push("-i", soundPath);
+        ffmpegArgs.push("-i", resolvedSoundPath);
     }
+}
 
-    args.push(
-        "-filter_complex", filter,
+function appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath) {
+    ffmpegArgs.push(
+        "-filter_complex", filterComplex,
         "-map", "0:v",
         "-map", "[audio]",
         "-c:v", "copy",
         "-c:a", "aac",
-        outputFile
+        outputFilePath
     );
-
-    return args;
 }
 
-export function addSounds(audio, duration) {
-    const events = Array.isArray(audio)
-    ? audio.filter(e => e && e.sound) : [];
+export function addSounds(rawAudioEvents, videoDuration, callerFilePath) {
+    const videoDirectory = path.dirname(callerFilePath);
+    const videoFilePath = path.join(videoDirectory, "visual.mp4");
+    const outputFilePath = path.join(videoDirectory, "audio.mp4");
 
-    if (events.length === 0) return remuxVideo();
+    const audioEvents = Array.isArray(rawAudioEvents)
+    ? rawAudioEvents.filter(event => event && event.sound) : [];
 
-    const [filterParts, mixInputs] = buildFilter(events);
+    if (audioEvents.length === 0)
+        return remuxVideoWithoutAudio(videoFilePath, outputFilePath);
 
-    // Ensure the resulting audio stream length never exceeds the video duration.
-    // Mix with "duration = longest" so all delayed events are heard.
-    // If we know the duration, trim the final mix to the video duration via "atrim".
-    const videoDurationSec = duration ?? null;
-    const videoDurationExpr = videoDurationSec != null ? String(videoDurationSec) : null;
+    const [filterPartStrings, mixInputLabels] = buildAudioFilterComplex(audioEvents);
 
-    let amix = getAmix(mixInputs, videoDurationExpr);
+    const amixFilter = buildAmixFilter(mixInputLabels, videoDuration);
+    const filterComplex = [filterPartStrings.join(";"), amixFilter].filter(Boolean).join(";");
 
-    const filter = [filterParts.join(";"), amix].filter(Boolean).join(";");
-    const args = getArgs(events, filter);
+    const ffmpegArgs = ["-y", "-i", videoFilePath];
+    appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex, videoDirectory);
+    appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath);
 
     console.log("Processing...");
 
     try {
-        execFileSync(ffmpegPath, args, {stdio: "inherit"});
+        execFileSync(ffmpegExecutablePath, ffmpegArgs, {stdio: "inherit"});
         console.log("Completed");
     }
     catch (error) {
         console.error("Failed:", error.message || error);
-        console.log("Args:", args);
+        console.log("Args:", ffmpegArgs);
         process.exit(error.status || 1);
     }
 }

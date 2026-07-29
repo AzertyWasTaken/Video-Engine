@@ -107,7 +107,7 @@ export function wrapRichTextSegments(prop) {
     // Build word/space chunks with bold state preserved.
     const tokens = prop.richText
     ? tokenizeRichText(prop.text)
-    : {text: prop.text, bold: false};
+    : [{text: prop.text, bold: false}];
 
     const chunks = chunkTokens(tokens);
     const lines = splitLines(chunks, prop);

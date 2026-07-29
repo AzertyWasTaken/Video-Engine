@@ -1,4 +1,5 @@
 "use strict";
+const filename = import.meta.filename;
 import {Engine as _} from "./Engine/engine.js";
 import {record} from "./Engine/record.js";
 import {addSounds} from "./Engine/addSounds.js";
@@ -9,15 +10,13 @@ const CONFIG = {
     FPS: 30
 };
 
-_.setProp({fontSize: 80, fontColor: "#FFE000", maxWidth: 960});
-_.setBackgroundColor("#400040");
+_.setProp({fontSize: 80, fontColor: "#FFE040", maxWidth: 960});
+_.setBackgroundColor("#402040");
 
 _.newText({text: "Text example.", posY: -200});
-_.changeProp("posY", 80);
 _.wait(2);
 
-_.newText({text: "Rich text with a *bold part*.", richText: true, posY: 200});
-_.changeProp("posY", 80);
+_.newText({text: "Rich text *with a bold* segment.", richText: true, posY: 200});
 _.wait(2);
 
 _.clear(0);
@@ -31,5 +30,5 @@ const audio = _.getAudioTimeline();
 const duration = _.getDuration();
 
 console.log(duration);
-await record(CONFIG, visual, duration);
-addSounds(audio, duration);
+await record(CONFIG, visual, duration, filename);
+addSounds(audio, duration, filename);

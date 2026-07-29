@@ -8,25 +8,25 @@ const visual = [];
 const audio = [];
 
 const textConfig = {
-    id: 0,
+    id: 0, // Integer or string group identifier (required)
 
     text: "Hello, world!",
     fontSize: 80,
     fontColor: "#FFFFFF",
     fontFamily: "Arial",
-    fontWeight: 400,
+    fontWeight: 400, // Normal; bold segments use 700
 
-    posX: 0,
-    posY: 0,
-    alignY: 0,
-    maxWidth: Infinity,
+    posX: 0, // Horizontal offset from center
+    posY: 0, // Vertical offset from center (before alignment)
+    alignY: 0, // Vertical alignment: -1 (top), 0 (center), 1 (bottom)
+    maxWidth: Infinity, // Line-wrap threshold (pixels)
 
-    richText: false,
-    segmentedText: false,
-    effect: false,
+    richText: false, // Enable *bold* markup parsing
+    segmentedText: false, // Enable ; segment splitting (delays between chunks)
+    effect: false, // Enable yellow flash on newly spawned text (0.5s)
 
-    autoSetPosY: false,
-    onTextSegment: () => {},
+    autoSetPosY: false, // Auto-increment posY for chained texts
+    onTextSegment: () => {}, // Callback per segment (textLength) => void
 };
 
 const textProp = {};

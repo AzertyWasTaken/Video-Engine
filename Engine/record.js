@@ -5,12 +5,8 @@ import {spawn} from "child_process";
 import {render, setCanvas} from "./render.js";
 
 const ffmpegPath = "C:/ffmpeg/bin/ffmpeg.exe";
-const scriptPath = fileURLToPath(import.meta.url);
-const videosDir = path.dirname(path.dirname(scriptPath));
 
-const outputFile = path.join(videosDir, "visual.mp4");
-
-function getFFMPEG(CONFIG) {
+function getFFMPEG(CONFIG, outputFile) {
     return spawn(ffmpegPath, [
         "-y",
         "-f", "rawvideo",
@@ -26,10 +22,13 @@ function getFFMPEG(CONFIG) {
     ])
 }
 
-export async function record(CONFIG, visual, duration) {
+export async function record(CONFIG, visual, duration, callerPath) {
+    const videoDir = path.dirname(callerPath);
+    const outputFile = path.join(videoDir, "visual.mp4");
+
     const totalFrames = CONFIG.FPS * duration;
 
-    const ffmpeg = getFFMPEG(CONFIG);
+    const ffmpeg = getFFMPEG(CONFIG, outputFile);
     setCanvas(CONFIG.WIDTH, CONFIG.HEIGHT);
 
     for (let f = 0; f < totalFrames; f++) {
