@@ -6,13 +6,22 @@ This project contains a Node.js/Canvas + FFmpeg pipeline to generate animated ma
 
 ### Animation scripts (`anim_*.js`)
 
+Starter template — copy to create new animations.
+
 Each `anim_*.js` file is a self-contained entry point that:
 
-1. Creates a timeline using the `Engine` API (from `Engine/engine.js`)
-2. Calls `record(CONFIG, visual, duration)` to encode `visual.mp4`
-3. Optionally calls `addSounds(audio, duration)` to produce `audio.mp4`
+1. Creates a timeline using the `Engine` API (from `Engine/engine.js`).
+2. Calls `record` and `addSounds` to encode `visual.mp4` and `audio.mp4`.
+
+**Engine modules are NOT entry points.** Never run `node Engine/record.js` directly — always run an `anim_*.js` script that imports from `Engine/`.
+
+### `package.json`
+
+{ "type": "module" }, dep: @napi-rs/canvas
 
 ### `Engine/engine.js`
+
+Core timeline builder (global state, time cursor).
 
 Exports the `Engine` object (aliased `_` in animation scripts), which maintains a global `time` cursor and accumulates `visual` and `audio` arrays.
 
@@ -22,20 +31,22 @@ Handles rich text tokenization (`*bold*` markup), width measurement, line wrappi
 
 ### `Engine/render.js`
 
-Takes the visual timeline and a time `t`, draws all active objects to a Canvas, and returns `ImageData`.
+Per-frame Canvas renderer (cached sort + binary search).
+
+Takes the visual timeline and a time `t`, draws all active objects to a Canvas, and returns `ImageData`. Uses cached sorted events with binary search for efficient per-frame filtering.
 
 ### `Engine/record.js`
 
 Spawns FFmpeg, writes consecutive RGBA frames (at `CONFIG.FPS`) to stdin, and produces `visual.mp4`.
 
 ```js
-record(CONFIG, visual, duration, callerPath)
+await record(CONFIG, visual, duration, callerPath)
 ```
 
 - `CONFIG` — `{WIDTH, HEIGHT, FPS}` object
 - `visual` — visual events array (from `_.getVisualTimeline()`)
 - `duration` — total seconds (from `_.getDuration()`)
-- `callerPath` — (optional) `import.meta.url` of the calling script; defaults to the calling file's directory
+- `callerPath` — `import.meta.url` of the calling script; defaults to the calling file's directory
 
 ### `Engine/addSounds.js`
 
@@ -88,12 +99,26 @@ _.changeProp(key, n) // Increment/decrement a default property (e.g. "posY", 80)
 | `effect` | `false` | Enable yellow flash on newly spawned text (0.5s) |
 | `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
 | `onTextSegment` | `() => {}` | Callback per segment `(textLength) => void` |
+| `textDelay` | `0` | Delay (seconds) before text appears after spawn |
+| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
+| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
 
 Properties passed directly to `_.newText({...})` are merged on top of the persistent defaults set by `_.setProp()`.
 
 #### `_.setText(id, text)`
 
-Replaces text for an existing id: calls `_.clear(id)` to end the old event, then creates a new text event with the same prior configuration (except `effect` and `autoSetPosY` are forced to `false`).
+Replaces text for an existing id: calls `_.clear(id)` to end the old event, then creates a new text event with the same prior configuration (except `effect`, `autoSetPosY`, `textDelay`, and `fadeIn` are forced to `false`/`0`).
+
+#### `_.newTextSection(newProp, textArray)`
+
+Adds grouped text with shared properties and per-entry vertical offsets and delays.
+
+- `textArray` is an array of `[textConfig, offsetY, delaySeconds]` tuples.
+- `offsetY` defaults to `0` if omitted.
+- `delaySeconds` defaults to `0` if omitted.
+- Each entry calls `_.newText()` with the shared `newProp` merged with the entry's `textConfig`, then `_.changeProp("posY", offsetY)` and `_.wait(delaySeconds)`.
+- After all entries, `_.centerText(prop.id, savedPosY)` centers the group.
+- **Important:** `newTextSection` mutates `textConfig.posY` via `changeProp` — be aware of side effects on subsequent calls.
 
 ### Rich text markup
 
@@ -119,6 +144,7 @@ onTextSegment: (textLength) => {
 ```js
 _.setBackgroundColor("#101020") // Set background at current time
 _.newCircle(id, posX, posY) // Add a circle at (posX, posY) from center
+_.newImage(id, src, posX, posY, width, height) // Add an image overlay at (posX, posY) from center
 _.clear(id) // End all active events with matching id
 _.centerText(idSet, posY) // Vertically center a group of ids around posY
 ```
@@ -179,8 +205,8 @@ _.clear(id) // text event ends at time = 3
   - `C:/ffmpeg/bin/ffmpeg.exe`
 
   If your FFmpeg path differs:
-  - In `Engine/record.js`: update the `ffmpegPath` constant
-  - In `Engine/addSounds.js`: set `FFMPEG_PATH` environment variable, or update the default fallback
+  - In `Engine/record.js`: update the `ffmpegPath` constant (or set the `FFMPEG_PATH` environment variable, which takes precedence)
+  - In `Engine/addSounds.js`: set the `FFMPEG_PATH` environment variable, or update the default fallback
 
 ## Setup & run
 
@@ -198,20 +224,35 @@ This produces:
 
 ### Creating a new animation
 
-1. Copy `anim_template.js` as a starting template.
-2. Import `Engine as _` from `"./Engine/engine.js"`, `record` from `"./Engine/record.js"`, and `addSounds` from `"./Engine/addSounds.js"`.
-3. Set `CONFIG` (width, height, FPS).
-4. Build the timeline with `_.newText`, `_.wait`, `_.sound`, etc.
-5. Call `await record(CONFIG, visual, duration)` and `addSounds(audio, duration)`.
+1. **Copy** `anim_template.js` → `anim_my_scene.js` (or similar name).
+2. **Import** the Engine and helpers:
+
+   ```js
+   import {Engine as _} from "./Engine/engine.js";
+   import {record} from "../Anim/Engine/record.js";
+   import {addSounds} from "../Anim/Engine/addSounds.js";
+   ```
+
+3. **Set CONFIG** (width, height, FPS).
+4. **Set defaults** with `_.setProp({...})` and `_.setBackgroundColor(...)`.
+5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.sound()`, etc.
+6. **Call** `await record(CONFIG, visual, duration, filename);` and `addSounds(audio, duration, filename);` to produce `visual.mp4` and `audio.mp4`.
+
+**Always pass `import.meta.url` as the last argument** to `record()` and `addSounds()` — this ensures output files are written next to your animation script, not in a random CWD.
 
 ## Troubleshooting
 
-| Symptom | Likely fix |
-| - | - |
-| `visual.mp4` not found | Run `node anim_template.js` first (not `node record.js` directly) |
-| FFmpeg not found | Check `ffmpegPath` in `Engine/record.js` (default: `C:/ffmpeg/bin/ffmpeg.exe`) |
-| Missing audio in output | Ensure `addSounds(audio, duration)` is uncommented in the animation script |
-| Audio events out of sync | Audio `start` depends on the `time` cursor (includes all `_.wait()` calls) |
-| Text not wrapping | Set `maxWidth` via `_.setProp({maxWidth: 960})` before calling `_.newText` |
-| Bold not rendering | Enable `richText: true` in `_.setProp()` or the `newText` call |
-| "Missing audio file" errors | Place `.wav`/`.mp3` files in the correct folder and reference with a path relative to the animation script (e.g. `"Sounds/click.wav"`) |
+| Symptom | Cause | Fix |
+| - | - | - |
+| `visual.mp4` not found | Ran `node Engine/record.js` directly | Run an `anim_*.js` script instead |
+| FFmpeg not found | Path mismatch | Update `ffmpegPath` in `record.js` or set `FFMPEG_PATH` env var |
+| Missing audio in output | `addSounds()` commented out | Uncomment `addSounds()` to enable it |
+| Audio out of sync | Audio `start` depends on `time` cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.sound()` match intended timing |
+| Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
+| Bold not rendering | `richText` is `false` by default | Enable `_.setProp({richText: true})` or pass in `newText()` |
+| "Missing audio file" | Sound path resolved relative to script dir, not CWD | Use paths like `"Sounds/click.wav"` (relative to script) |
+| Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible |
+| `setText` loses config | `textProp[id]` not set (e.g., `newText` never called for that id) | Ensure `_.newText()` was called with the same `id` before `_.setText()` |
+| `newTextSection` shifts subsequent text | `changeProp("posY", offset)` mutates `textConfig` | Call `_.setProp({posY: 0})` to reset, or account for the offset |
+| `NaN` duration | `newTextSection` tuple missing `delaySeconds` | Now defaults to `0` — update to latest engine.js |
+| `callerPath` errors | Passed `import.meta.filename` instead of `import.meta.url` | Use `import.meta.url` (a `file://` URL) |

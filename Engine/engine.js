@@ -23,7 +23,10 @@ const textConfig = {
 
     richText: false, // Enable *bold* markup parsing
     segmentedText: false, // Enable ; segment splitting (delays between chunks)
+
     effect: false, // Enable yellow flash on newly spawned text (0.5s)
+    fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
+    fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
 
     autoSetPosY: false, // Auto-increment posY for chained texts
     onTextSegment: () => {}, // Callback per segment (textLength) => void
@@ -60,6 +63,8 @@ function pushTextSegment(prop, seg, posX, posY) {
         fontColor: prop.fontColor,
         fontWeight: seg.bold ? 700 : prop.fontWeight,
         effect: prop.effect,
+        fadeIn: prop.fadeIn,
+        fadeOut: prop.fadeOut,
         start: time
     });
 }
@@ -95,7 +100,7 @@ function pushTextLine(prop, segments, linePosY) {
 
 export const Engine = {
     wait(sec) {
-        time += sec;
+        time += sec ?? 0;
     },
 
     sound(path, volume) {
@@ -120,9 +125,21 @@ export const Engine = {
         visual.push({
             type: "circle",
             id: id,
-            posX:
-            posX,
+            posX: posX,
             posY: posY,
+            start: time
+        });
+    },
+
+    newImage(id, src, posX, posY, width, height) {
+        visual.push({
+            type: "image",
+            id: id,
+            src: src,
+            posX: posX,
+            posY: posY,
+            width: width,
+            height: height,
             start: time
         });
     },
@@ -132,7 +149,7 @@ export const Engine = {
         textLength = 0;
 
         // Wrap while preserving bold state across line breaks.
-        const lines = wrapRichTextSegments(prop, textConfig);
+        const lines = wrapRichTextSegments(prop);
         const lineHeight = prop.fontSize;
         const totalHeight = lines.length * lineHeight;
 
@@ -154,14 +171,28 @@ export const Engine = {
         textLength = 0;
     },
 
+    newTextSection(newProp, textArray) {
+        const prop = {...textConfig, ...newProp};
+        const savedPosY = prop.posY;
+
+        for (const [entryConfig, offsetY = 0, delaySeconds = 0] of textArray) {
+            prop.posY = textConfig.posY;
+            Engine.newText({...prop, ...entryConfig});
+            Engine.changeProp("posY", offsetY);
+            Engine.wait(delaySeconds);
+        }
+
+        Engine.centerText(prop.id, savedPosY);
+    },
+
     setText(id, text) {
-        this.clear(id);
-        this.newText({
+        Engine.clear(id);
+
+        Engine.newText({
             ...textProp[id],
             text,
             effect: false,
             autoSetPosY: false,
-            textDelay: () => 0
         });
     },
 
@@ -188,4 +219,4 @@ export const Engine = {
     getVisualTimeline() {return visual;},
     getAudioTimeline() {return audio;},
     getDuration() {return time;}
-}
+};

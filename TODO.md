@@ -17,33 +17,39 @@
 - [x] Improve `TODO.md`
 - [x] Review `README.md`
 - [x] Rename `addSounds.js` variables and functions
+- [x] Fix `callerPath` URL→path conversion bug in `record.js` and `addSounds.js`
+- [x] Add `newImage()` support for image overlays
+- [x] Add `fadeIn`/`fadeOut` text effects
+- [x] Add `textDelay` property for delayed text appearance
+- [x] Optimize `render.js` with cached sorted events + binary search
+- [x] Test image generation
 
 ## Engine
 
 - [ ] Balanced width text wrapping
 - [ ] Exponentiation wrapping `$`
-- [ ] Group linear vertical paragraph
 - [ ] Rich text escape bar `\`
 - [ ] Draw lines
 - [ ] Fixed duration text
 - [ ] Support special characters
 
-## Code
+### Group linear vertical paragraph
 
-N/A
+- Use shared properties
+- Custom Y-space property
+- Center group at the end
+- `_.newTextSection(array, offset)`
 
-## Documentation
-
-N/A
+- [x] Create function
+- [x] Update template anim script
+- [x] Y-space and delay properties
+- [ ] Allow auto text delay
 
 ## Ideas
 
 - Request single frame option
-- Optimize `visual.filter` time performances
 - Gradient background
 - Text typing effect
-- Text fading effect
 - Text moving effect
 - Code blocks with font `monospace`
 - Bullet lists
-- Math equation wrapping `$`

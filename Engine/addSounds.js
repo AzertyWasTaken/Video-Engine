@@ -5,7 +5,16 @@ import path from "path";
 import {fileURLToPath} from "url";
 
 const ffmpegExecutablePath = process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe";
-const scriptFilePath = fileURLToPath(import.meta.url);
+
+function resolveCallerPath(callerPath) {
+    if (!callerPath) return process.cwd();
+    // callerPath may be an import.meta.url (e.g. "file:///d:/VSC/Anim/anim.js")
+    // or an already-resolved file path. Handle both.
+    if (callerPath.startsWith("file:")) {
+        return fileURLToPath(callerPath);
+    }
+    return callerPath;
+}
 
 // If no valid audio events, just remux the video.
 function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
@@ -48,7 +57,8 @@ function buildAudioFilterComplex(audioEvents) {
 
 // Always output an [audio] label (ffmpeg -map "[audio]" depends on it).
 function buildAmixFilter(mixInputLabels, videoDuration) {
-    const durationString = videoDuration !== null ? String(videoDuration) : null;
+    const durationString = (videoDuration !== null && !Number.isNaN(videoDuration))
+    ? String(videoDuration) : null;
 
     // Mix with "duration = longest" so all delayed events are heard.
     const mixInputs = mixInputLabels.join("");
@@ -121,7 +131,8 @@ function appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath) {
 }
 
 export function addSounds(rawAudioEvents, videoDuration, callerFilePath) {
-    const videoDirectory = path.dirname(callerFilePath);
+    const resolvedPath = resolveCallerPath(callerFilePath);
+    const videoDirectory = path.dirname(resolvedPath);
     const videoFilePath = path.join(videoDirectory, "visual.mp4");
     const outputFilePath = path.join(videoDirectory, "audio.mp4");
 
