@@ -27,8 +27,9 @@ const textConfig = {
     effect: false, // Enable yellow flash on newly spawned text (0.5s)
     fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
     fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
-
     autoSetPosY: false, // Auto-increment posY for chained texts
+    autoDelay: false, // Auto-compute delay per entry in newTextSection based on text length
+
     onTextSegment: () => {}, // Callback per segment (textLength) => void
 };
 
@@ -174,25 +175,39 @@ export const Engine = {
     newTextSection(newProp, textArray) {
         const prop = {...textConfig, ...newProp};
         const savedPosY = prop.posY;
+        // Save textConfig.posY so we can restore it — newTextSection must not
+        // leak posY mutations into the global textConfig (side-effect free).
+        const savedConfigPosY = textConfig.posY;
 
-        for (const [entryConfig, offsetY = 0, delaySeconds = 0] of textArray) {
+        for (const entry of textArray) {
+            // Object: {text: "...", offsetY: 40, delay: 1, ...textProps}
+            const {offsetY = 0, delay = 0, ...entryConfig} = entry;
+
+            // Auto-compute delay from text length when autoDelay is enabled
+            // and no explicit delay was given.
+            const delaySec = typeof delay === "function"
+            ? delay(entryConfig.text.length) : delay;
+
             prop.posY = textConfig.posY;
             Engine.newText({...prop, ...entryConfig});
             Engine.changeProp("posY", offsetY);
-            Engine.wait(delaySeconds);
+            Engine.wait(delaySec);
         }
 
         Engine.centerText(prop.id, savedPosY);
+        // Restore textConfig.posY to avoid side effects on subsequent calls.
+        textConfig.posY = savedConfigPosY;
     },
 
     setText(id, text) {
-        Engine.clear(id);
+        Engine.clear(id, true);
 
         Engine.newText({
             ...textProp[id],
             text,
             effect: false,
             autoSetPosY: false,
+            fadeIn: 0,
         });
     },
 
@@ -208,10 +223,11 @@ export const Engine = {
         });
     },
 
-    clear(id) {
+    clear(id, noFadeOut) {
         visual.forEach((value) => {
             if (value.id === id) {
                 value.end ??= time;
+                if (noFadeOut) value.fadeOut = 0;
             }
         });
     },

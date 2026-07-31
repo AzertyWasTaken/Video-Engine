@@ -1,4 +1,4 @@
-# Anim
+﻿# Anim
 
 This project contains a Node.js/Canvas + FFmpeg pipeline to generate animated math videos with rich text, audio, and custom effects.
 
@@ -68,7 +68,7 @@ The `Engine` object is the core timeline builder. All methods modify a global st
 
 ```js
 _.wait(sec) // Advance the time cursor by `sec` seconds
-_.getDuration() // → total elapsed time
+_.getDuration() // â†’ total elapsed time
 ```
 
 ### Text
@@ -98,6 +98,7 @@ _.changeProp(key, n) // Increment/decrement a default property (e.g. "posY", 80)
 | `segmentedText` | `false` | Enable `;` segment splitting (delays between chunks) |
 | `effect` | `false` | Enable yellow flash on newly spawned text (0.5s) |
 | `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
+| `autoDelay` | `false` | Auto-compute delay per entry in `newTextSection` based on text length |
 | `onTextSegment` | `() => {}` | Callback per segment `(textLength) => void` |
 | `textDelay` | `0` | Delay (seconds) before text appears after spawn |
 | `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
@@ -113,12 +114,30 @@ Replaces text for an existing id: calls `_.clear(id)` to end the old event, then
 
 Adds grouped text with shared properties and per-entry vertical offsets and delays.
 
-- `textArray` is an array of `[textConfig, offsetY, delaySeconds]` tuples.
-- `offsetY` defaults to `0` if omitted.
-- `delaySeconds` defaults to `0` if omitted.
-- Each entry calls `_.newText()` with the shared `newProp` merged with the entry's `textConfig`, then `_.changeProp("posY", offsetY)` and `_.wait(delaySeconds)`.
+- `textArray` is an array of **entry objects**.
+- **Object format (preferred):** each entry is a text config object with two optional named properties:
+  - `offsetY` — vertical offset from the previous entry (default `0`)
+  - `delay` — seconds to wait after this entry appears (default `0`)
+  - All other properties are passed through to `_.newText()` as text config.
+- Each entry calls `_.newText()` with the shared `newProp` merged with the entry's config, then advances `posY` by `offsetY` and waits `delay` seconds.
 - After all entries, `_.centerText(prop.id, savedPosY)` centers the group.
-- **Important:** `newTextSection` mutates `textConfig.posY` via `changeProp` — be aware of side effects on subsequent calls.
+- **Side-effect free:** `textConfig.posY` is saved and restored, so `newTextSection` does not leak `posY` mutations into subsequent calls.
+- **`autoDelay` option:** when `autoDelay: true` is set in `newProp`, any entry without an explicit `delay` gets a delay auto-computed from its text length (`Math.floor(text.length / 12 + 2) / 2`), matching the segmented-text timing pattern.
+
+```js
+// Object format (preferred)
+_.newTextSection({alignY: 1, autoSetPosY: true}, [
+    {text: "Font color", fontColor: "#FFE040", offsetY: 40, delay: 1},
+    {text: "Font family", fontFamily: "Times New Roman", offsetY: 80},
+    {text: "Just a long text block; for *testing* purposes.", maxWidth: 800, offsetY: 80, delay: 3},
+]);
+
+// autoDelay — delays computed from text length automatically
+_.newTextSection({alignY: 1, autoSetPosY: true, autoDelay: true}, [
+    {text: "Auto delay entry one", offsetY: 40},
+    {text: "Auto delay entry two with more text", offsetY: 80},
+]);
+```
 
 ### Rich text markup
 
@@ -152,9 +171,9 @@ _.centerText(idSet, posY) // Vertically center a group of ids around posY
 ### Timeline access
 
 ```js
-_.getVisualTimeline() // → visual events array
-_.getAudioTimeline() // → audio events array
-_.getDuration() // → total seconds
+_.getVisualTimeline() // â†’ visual events array
+_.getAudioTimeline() // â†’ audio events array
+_.getDuration() // â†’ total seconds
 ```
 
 ### Sound
@@ -182,10 +201,10 @@ _.clear(id) // text event ends at time = 3
 ## Text rendering pipeline
 
 1. Input text string
-2. `tokenizeRichText()` — parse **bold** markers → token array `[{text, bold}, ...]`
+2. `tokenizeRichText()` — parse **bold** markers â†’ token array `[{text, bold}, ...]`
 3. `chunkTokens()` — split tokens into word/space chunks
-4. `splitLines()` — measure widths, wrap at maxWidth → lines of chunks
-5. `segTextLine()` — split chunks at ; (if segmentedText) → `["wait", {text, bold}, ...]`
+4. `splitLines()` — measure widths, wrap at maxWidth â†’ lines of chunks
+5. `segTextLine()` — split chunks at ; (if segmentedText) â†’ `["wait", {text, bold}, ...]`
 6. `pushTextLine()` — measure each segment, compute x-positions, push visual events
 7. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
 
@@ -224,11 +243,11 @@ This produces:
 
 ### Creating a new animation
 
-1. **Copy** `anim_template.js` → `anim_my_scene.js` (or similar name).
+1. **Copy** `anim_template.js` â†’ `anim_my_scene.js` (or similar name).
 2. **Import** the Engine and helpers:
 
    ```js
-   import {Engine as _} from "./Engine/engine.js";
+   import {Engine as _} from "../Anim/Engine/engine.js";
    import {record} from "../Anim/Engine/record.js";
    import {addSounds} from "../Anim/Engine/addSounds.js";
    ```
@@ -253,6 +272,4 @@ This produces:
 | "Missing audio file" | Sound path resolved relative to script dir, not CWD | Use paths like `"Sounds/click.wav"` (relative to script) |
 | Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible |
 | `setText` loses config | `textProp[id]` not set (e.g., `newText` never called for that id) | Ensure `_.newText()` was called with the same `id` before `_.setText()` |
-| `newTextSection` shifts subsequent text | `changeProp("posY", offset)` mutates `textConfig` | Call `_.setProp({posY: 0})` to reset, or account for the offset |
-| `NaN` duration | `newTextSection` tuple missing `delaySeconds` | Now defaults to `0` — update to latest engine.js |
 | `callerPath` errors | Passed `import.meta.filename` instead of `import.meta.url` | Use `import.meta.url` (a `file://` URL) |
