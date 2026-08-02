@@ -7,7 +7,7 @@ const ctx = canvas.getContext("2d");
 // Produces an ordered list of segments with bold state applied across the whole input.
 // Markup: *bold* (no nesting). Asterisks are not rendered.
 // Each segment is on the form of {text: <string>, bold: <bool>}
-export function tokenizeRichText(text) {
+function tokenizeBoldText(text, symbol) {
     const tokens = [];
     let bold = false;
     let current = "";
@@ -15,7 +15,7 @@ export function tokenizeRichText(text) {
     for (let i = 0; i < text.length; i++) {
         const ch = text[i];
 
-        if (ch === "*") {
+        if (ch === symbol) {
             if (current.length > 0) tokens.push({text: current, bold});
             current = "";
             bold = !bold;
@@ -101,27 +101,11 @@ function splitLines(chunks, prop) {
     return lines;
 }
 
-// Wrap while preserving bold state across line breaks.
-// This must match the vertical positioning behavior of getWrappedTextPos().
-export function wrapRichTextSegments(prop) {
-    // Build word/space chunks with bold state preserved.
-    const tokens = prop.richText
-    ? tokenizeRichText(prop.text)
-    : [{text: prop.text, bold: false}];
-
-    const chunks = chunkTokens(tokens);
-    const lines = splitLines(chunks, prop);
-
-    return prop.segmentedText
-    ? lines.map(segTextLine)
-    : lines;
-}
-
-export function segTextLine(line) {
+function segTextLine(line, symbol) {
     const result = [];
 
     for (const seg of line) {
-        const split = seg.text.split(";");
+        const split = seg.text.split(symbol);
 
         for (let i = 0; i < split.length; i++) {
             if (i > 0) result.push("wait");
@@ -132,4 +116,20 @@ export function segTextLine(line) {
     }
 
     return result;
+}
+
+// Wrap while preserving bold state across line breaks.
+// This must match the vertical positioning behavior of getWrappedTextPos().
+export function wrapBoldTextSegments(prop) {
+    // Build word/space chunks with bold state preserved.
+    const tokens = prop.boldSymbol === null
+    ? [{text: prop.text, bold: false}]
+    : tokenizeBoldText(prop.text, prop.boldSymbol);
+
+    const chunks = chunkTokens(tokens);
+    const lines = splitLines(chunks, prop);
+
+    return prop.segmentSymbol === null
+    ? lines
+    : lines.map((i) => segTextLine(i, prop.segmentSymbol));
 }

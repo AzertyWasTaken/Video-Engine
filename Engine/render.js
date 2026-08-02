@@ -104,7 +104,7 @@ export function render(visual, t) {
         }
         else if (obj.type === "circle") {
             ctx.beginPath();
-            ctx.arc(width / 2 + obj.posX, height / 2 + obj.posY, 40, 0, 2 * Math.PI);
+            ctx.arc(width / 2 + obj.posX, height / 2 + obj.posY, obj.diameter, 0, 2 * Math.PI);
             ctx.fillStyle = "#FFFFFF";
             ctx.fill();
         }

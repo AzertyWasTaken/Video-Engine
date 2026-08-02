@@ -24,12 +24,14 @@
 - [x] Optimize `render.js` with cached sorted events + binary search
 - [x] Test image generation
 - [x] Group linear vertical paragraph
+- [x] Custom wrapping symbols
 
 ## Engine
 
+- [ ] Rich text escape bar `\`
+- [ ] Color parts of text
 - [ ] Balanced width text wrapping
 - [ ] Exponentiation wrapping `$`
-- [ ] Rich text escape bar `\`
 - [ ] Draw lines
 - [ ] Fixed duration text
 - [ ] Support special characters

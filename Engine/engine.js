@@ -1,7 +1,7 @@
 "use strict";
 import {
     getSegmentsWidth,
-    wrapRichTextSegments
+    wrapBoldTextSegments
 } from "./textParser.js";
 
 const visual = [];
@@ -21,8 +21,8 @@ const textConfig = {
     alignY: 0, // Vertical alignment: -1 (top), 0 (center), 1 (bottom)
     maxWidth: Infinity, // Line-wrap threshold (pixels)
 
-    richText: false, // Enable *bold* markup parsing
-    segmentedText: false, // Enable ; segment splitting (delays between chunks)
+    boldSymbol: null, // Enable bold markup parsing with selected symbol
+    segmentSymbol: null, // Enable segment splitting with selected symbol
 
     effect: false, // Enable yellow flash on newly spawned text (0.5s)
     fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
@@ -122,12 +122,13 @@ export const Engine = {
         textConfig[key] += value;
     },
 
-    newCircle(id, posX, posY) {
+    newCircle(id, posX, posY, diameter) {
         visual.push({
             type: "circle",
             id: id,
             posX: posX,
             posY: posY,
+            diameter: diameter,
             start: time
         });
     },
@@ -150,7 +151,7 @@ export const Engine = {
         textLength = 0;
 
         // Wrap while preserving bold state across line breaks.
-        const lines = wrapRichTextSegments(prop);
+        const lines = wrapBoldTextSegments(prop);
         const lineHeight = prop.fontSize;
         const totalHeight = lines.length * lineHeight;
 
