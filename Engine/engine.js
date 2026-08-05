@@ -22,7 +22,9 @@ const textConfig = {
     maxWidth: Infinity, // Line-wrap threshold (pixels)
 
     boldSymbol: null, // Enable bold markup parsing with selected symbol
+    colorSymbol: [], // Enable color markup parsing with selected symbol
     segmentSymbol: null, // Enable segment splitting with selected symbol
+    escapeSymbol: null, // Enable escaping special characters with selected symbol
 
     effect: false, // Enable yellow flash on newly spawned text (0.5s)
     fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
@@ -61,7 +63,7 @@ function pushTextSegment(prop, seg, posX, posY) {
         posY,
         fontFamily: prop.fontFamily,
         fontSize: prop.fontSize,
-        fontColor: prop.fontColor,
+        fontColor: seg.color ?? prop.fontColor,
         fontWeight: seg.bold ? 700 : prop.fontWeight,
         effect: prop.effect,
         fadeIn: prop.fadeIn,
@@ -225,8 +227,10 @@ export const Engine = {
     },
 
     clear(id, noFadeOut) {
+        if (typeof id !== "object") id = new Set([id]);
+
         visual.forEach((value) => {
-            if (value.id === id) {
+            if (id.has(value.id)) {
                 value.end ??= time;
                 if (noFadeOut) value.fadeOut = 0;
             }

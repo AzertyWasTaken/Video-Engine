@@ -4,29 +4,85 @@ import {createCanvas} from "@napi-rs/canvas";
 const canvas = createCanvas(1, 1);
 const ctx = canvas.getContext("2d");
 
-// Produces an ordered list of segments with bold state applied across the whole input.
-// Markup: *bold* (no nesting). Asterisks are not rendered.
-// Each segment is on the form of {text: <string>, bold: <bool>}
-function tokenizeBoldText(text, symbol) {
+// Produces an ordered list of segments with bold and color state applied across the whole input text.
+// Each returned segment has the form `{text: <string>, bold: <bool>, color: <rgb|null>}`.
+// Special characters (bold toggle, color toggle, and escape) can be escaped.
+function tokenizeBoldText(text, boldCh, colorCh, escapeCh) {
     const tokens = [];
     let bold = false;
+    const colorStack = [];
     let current = "";
+
+    // Flush the accumulated character buffer into a new token (if non-empty),
+    // capturing the current bold and color state, then reset the buffer.
+    const flush = () => {
+        if (current.length > 0) {
+            const color = colorStack.at(-1) ?? null;
+            tokens.push({text: current, bold, color});
+        }
+        current = "";
+    };
+
+    // Build a lookup map for O(1) per-character color-symbol matching.
+    const colorMap = new Map();
+    for (const {color, symbol} of colorCh) {
+        colorMap.set(symbol, color);
+    }
 
     for (let i = 0; i < text.length; i++) {
         const ch = text[i];
 
-        if (ch === symbol) {
-            if (current.length > 0) tokens.push({text: current, bold});
-            current = "";
+        // ---- Color symbols ----
+        // Toggle the corresponding color on / off the stack.
+        const color = colorMap.get(ch);
+        if (color !== undefined) {
+            // Flush the buffer with the *current* (pre-toggle) color first.
+            flush();
+
+            const topColor = colorStack.at(-1) ?? null;
+            if (topColor === color) {
+                // Same color on top → pop (turn off).
+                colorStack.pop();
+            } else {
+                // Different color → push (turn on).
+                colorStack.push(color);
+            }
+            continue;
+        }
+
+        // ---- Bold symbol ----
+        if (ch === boldCh) {
+            flush();
             bold = !bold;
             continue;
         }
 
+        // Escape symbol: keep it in the output for downstream parsing (segTextLine),
+        // and copy the next character verbatim so it skips bold / color parsing here.
+        if (ch === escapeCh) {
+            current += ch;
+            const next = text[i + 1];
+            if (next) {
+                current += next;
+                i++;
+            }
+            continue;
+        }
+
+        // ---- Regular character ----
         current += ch;
     }
 
-    if (current.length > 0) tokens.push({text: current, bold});
+    // Flush any remaining characters.
+    flush();
+
     return tokens;
+}
+
+function measureChunkWidth(chunk, prop) {
+    const weight = chunk.bold ? 700 : prop.fontWeight;
+    ctx.font = `${weight} ${prop.fontSize}px ${prop.fontFamily}`;
+    return ctx.measureText(chunk.text).width;
 }
 
 export function getSegmentsWidth(prop, segments) {
@@ -35,20 +91,12 @@ export function getSegmentsWidth(prop, segments) {
     const segWidths = segments.map((seg) => {
         if (typeof seg !== "object") return 0;
 
-        const weight = seg.bold ? 700 : prop.fontWeight;
-        ctx.font = `${weight} ${prop.fontSize}px ${prop.fontFamily}`;
-        const w = ctx.measureText(seg.text).width;
+        const w = measureChunkWidth(seg, prop);
         totalWidth += w;
         return w;
     });
 
     return [totalWidth, segWidths];
-}
-
-function measureChunkWidth(chunk, prop) {
-    const weight = chunk.bold ? 700 : prop.fontWeight;
-    ctx.font = `${weight} ${prop.fontSize}px ${prop.fontFamily}`;
-    return ctx.measureText(chunk.text).width;
 }
 
 // Flatten tokens into a stream of words and spaces.
@@ -62,10 +110,10 @@ function chunkTokens(tokens) {
             const word = words[i];
 
             if (i > 0)
-                chunks.push({text: " ", bold: seg.bold});
+                chunks.push({text: " ", bold: seg.bold, color: seg.color});
 
             if (word.length > 0)
-                chunks.push({text: word, bold: seg.bold});
+                chunks.push({text: word, bold: seg.bold, color: seg.color});
         }
     }
 
@@ -101,18 +149,39 @@ function splitLines(chunks, prop) {
     return lines;
 }
 
-function segTextLine(line, symbol) {
+// Split a line by the segment symbol while respecting backslash escapes.
+// A backslash before the symbol (or another backslash) makes it literal
+// text instead of a segment boundary.
+function segTextLine(line, symbol, escape) {
     const result = [];
 
     for (const seg of line) {
-        const split = seg.text.split(symbol);
+        let current = "";
+        for (let i = 0; i < seg.text.length; i++) {
+            const ch = seg.text[i];
 
-        for (let i = 0; i < split.length; i++) {
-            if (i > 0) result.push("wait");
+            if (ch === symbol) {
+                if (current.length > 0)
+                    result.push({text: current, bold: seg.bold, color: seg.color});
+                current = "";
+                result.push("wait");
+                continue;
+            }
 
-            if (split[i].length > 0)
-                result.push({text: split[i], bold: seg.bold});
+            if (ch === escape) {
+                const next = seg.text[i + 1];
+                if (!next) continue;
+
+                current += next;
+                i++;
+                continue;
+            }
+
+            current += ch;
         }
+
+        if (current.length > 0)
+            result.push({text: current, bold: seg.bold, color: seg.color});
     }
 
     return result;
@@ -121,15 +190,21 @@ function segTextLine(line, symbol) {
 // Wrap while preserving bold state across line breaks.
 // This must match the vertical positioning behavior of getWrappedTextPos().
 export function wrapBoldTextSegments(prop) {
+    let text = prop.text;
+
     // Build word/space chunks with bold state preserved.
-    const tokens = prop.boldSymbol === null
-    ? [{text: prop.text, bold: false}]
-    : tokenizeBoldText(prop.text, prop.boldSymbol);
+    let tokens = prop.boldSymbol === null
+    ? [{text, bold: false}]
+    : tokenizeBoldText(text, prop.boldSymbol, prop.colorSymbol, prop.escapeSymbol);
 
-    const chunks = chunkTokens(tokens);
-    const lines = splitLines(chunks, prop);
+    tokens = chunkTokens(tokens);
+    tokens = splitLines(tokens, prop);
 
-    return prop.segmentSymbol === null
-    ? lines
-    : lines.map((i) => segTextLine(i, prop.segmentSymbol));
+    if (prop.segmentSymbol !== null) {
+        tokens = tokens.map((i) =>
+            segTextLine(i, prop.segmentSymbol, prop.escapeSymbol)
+        );
+    }
+
+    return tokens;
 }

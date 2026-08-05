@@ -15,15 +15,23 @@ function textDelay(length) {
 }
 
 // Defaults
-_.setProp({fontSize: 80, maxWidth: 960, richText: true});
-_.setBackgroundColor("#402040");
+_.setProp({
+    fontSize: 80,
+    maxWidth: 960,
+    boldSymbol: "*",
+    colorSymbol: [{color: "#FF6060", symbol: "_"}],
+    segmentSymbol: ";",
+    escapeSymbol: "\\"
+});
+
+_.setBackgroundColor("#000080");
 
 // Text with yellow flash effect
-_.newText({text: "Text example with effect.", posY: -300, effect: true});
+_.newText({text: "Text example with yellow flash effect.", posY: -300, effect: true});
 _.wait(1);
 
-// Rich text with bold segments
-_.newText({text: "Rich text *with bold* segments.", posY: -60});
+// Text with a bold segment
+_.newText({text: "Text with *a bold* segment.", posY: -60});
 _.wait(1);
 
 // Image
@@ -37,7 +45,6 @@ _.setProp({id: 1});
 // Segmented text with sound on each segment
 _.newText({
     text: "This text is so long it; takes multiple lines and; has two segments.",
-    segmentedText: true,
     onTextSegment: (textLength) => {
         _.sound("Sounds/click.wav", 2);
         _.wait(Math.floor(textLength / 12 + 2) / 2);
@@ -52,7 +59,7 @@ _.setProp({id: 2});
 _.newTextSection({alignY: 1, autoSetPosY: true}, [
     {text: "Font color", fontColor: "#FFE040", offsetY: 40, delay: 1},
     {text: "Font family", fontFamily: "Times New Roman", offsetY: 80},
-    {text: "Just a long text block; for *testing* purposes.", maxWidth: 800, offsetY: 80, delay: 3},
+    {text: "Just a long _text_ block; for *testing* purposes.", segmentSymbol: null, maxWidth: 800, offsetY: 80, delay: 3},
 ]);
 _.clear(2);
 
@@ -65,14 +72,15 @@ _.newTextSection({alignY: 1, autoSetPosY: true}, [
 _.clear(5);
 
 // Fade in / fade out text
-_.setProp({id: 3, fadeIn: 1, fadeOut: 1});
-_.newText({text: "Fading in and out...", posX: 0, posY: 0});
+_.setProp({id: 3});
+_.newText({text: "Fading in and out...", fadeIn: 1, fadeOut: 1, posY: 120});
+_.newText({text: "Use \\\\ to *escape*; special characters (like \\* or \\;).", posY: -120});
 _.wait(3);
 _.clear(3);
 
 // Circle visual
 _.setProp({id: 4});
-_.newCircle(4, 0, 0);
+_.newCircle(4, 0, 0, 40);
 _.wait(1);
 
 // Render video and audio
@@ -82,4 +90,4 @@ const duration = _.getDuration();
 
 console.log(`Duration: ${duration}s`);
 await record(CONFIG, visual, duration, filename);
-addSounds(audio, duration, filename);
+// addSounds(audio, duration, filename);

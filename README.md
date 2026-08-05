@@ -68,7 +68,7 @@ The `Engine` object is the core timeline builder. All methods modify a global st
 
 ```js
 _.wait(sec) // Advance the time cursor by `sec` seconds
-_.getDuration() // â†’ total elapsed time
+_.getDuration() // Total elapsed time
 ```
 
 ### Text
@@ -171,9 +171,9 @@ _.centerText(idSet, posY) // Vertically center a group of ids around posY
 ### Timeline access
 
 ```js
-_.getVisualTimeline() // â†’ visual events array
-_.getAudioTimeline() // â†’ audio events array
-_.getDuration() // â†’ total seconds
+_.getVisualTimeline() // Visual events array
+_.getAudioTimeline() // Audio events array
+_.getDuration() // Total seconds
 ```
 
 ### Sound
@@ -201,10 +201,10 @@ _.clear(id) // text event ends at time = 3
 ## Text rendering pipeline
 
 1. Input text string
-2. `tokenizeRichText()` — parse **bold** markers â†’ token array `[{text, bold}, ...]`
+2. `tokenizeRichText()` — parse **bold** markers token array `[{text, bold}, ...]`
 3. `chunkTokens()` — split tokens into word/space chunks
-4. `splitLines()` — measure widths, wrap at maxWidth â†’ lines of chunks
-5. `segTextLine()` — split chunks at ; (if segmentedText) â†’ `["wait", {text, bold}, ...]`
+4. `splitLines()` — measure widths, wrap at maxWidth lines of chunks
+5. `segTextLine()` — split chunks at ; (if segmentedText) `["wait", {text, bold}, ...]`
 6. `pushTextLine()` — measure each segment, compute x-positions, push visual events
 7. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
 
@@ -243,7 +243,7 @@ This produces:
 
 ### Creating a new animation
 
-1. **Copy** `anim_template.js` â†’ `anim_my_scene.js` (or similar name).
+1. **Copy** `anim_template.js`.
 2. **Import** the Engine and helpers:
 
    ```js
