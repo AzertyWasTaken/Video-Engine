@@ -124,13 +124,16 @@ export const Engine = {
         textConfig[key] += value;
     },
 
-    newCircle(id, posX, posY, diameter) {
+    newCircle(id, posX, posY, diameter, color) {
         visual.push({
             type: "circle",
             id: id,
             posX: posX,
             posY: posY,
             diameter: diameter,
+            color,
+            fadeIn,
+            fadeOut,
             start: time
         });
     },
@@ -144,6 +147,8 @@ export const Engine = {
             posY: posY,
             width: width,
             height: height,
+            fadeIn,
+            fadeOut,
             start: time
         });
     },

@@ -23,11 +23,11 @@
 The `Engine` maintains a **monotonically increasing `time` cursor**. Everything is positioned relative to this cursor.
 
 ```js
-_.wait(2)              // time = 2
-_.newText({...})       // text event starts at time = 2
-_.wait(1)              // time = 3
-_.sound("Sounds/click.wav")  // audio event starts at time = 3
-_.clear(id)            // text event ends at time = 3
+_.wait(2) // time = 2
+_.newText({...}) // text event starts at time = 2
+_.wait(1) // time = 3
+_.sound("Sounds/click.wav") // audio event starts at time = 3
+_.clear(id) // text event ends at time = 3
 ```
 
 **Critical mental model:** Every `_.newText()`, `_.sound()`, `_.setBackgroundColor()`, `_.newCircle()` call is positioned at the **current** `time` cursor. `_.wait()` is the only way to advance time. There is no "absolute time" parameter on events — they all inherit `time` at call-site.
@@ -63,7 +63,7 @@ This produces `visual.mp4` and `audio.mp4` in the project root.
 These notes are essential for modifying engine internals:
 
 - **`textParser.js`** creates a **1×1 canvas** at module load for `measureText()` calls. This is a singleton — do not recreate it.
-- **`wrapRichTextSegments(prop)`** takes only `prop` (the merged config). The second argument `textConfig` that was previously passed from `engine.js` was unused — it has been removed.
+- **`wrapBoldTextSegments(prop)`** takes only `prop` (the merged config). The second argument `textConfig` that was previously passed from `engine.js` was unused — it has been removed.
 - **`pushTextLine()`** calls `prop.onTextSegment(textLength)` when it encounters a `"wait"` marker (from `;` splitting). This is how segmented text triggers sounds and waits.
 - **`getSegmentsWidth()`** is called per line in `pushTextLine()` — it re-measures all segments. This is a performance hotspot if you have many text events.
 - **`record.js`** uses `process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe"` — the env var takes precedence over the hardcoded default.
@@ -79,3 +79,16 @@ These notes are essential for modifying engine internals:
 5. **Testing:** Run `node anim_template.js` to verify the full pipeline. Check `visual.mp4` and `audio.mp4` outputs.
 6. **Debugging:** Add `console.log` in `engine.js` methods to trace the time cursor and event pushes. The `visual` and `audio` arrays are accessible via `_.getVisualTimeline()` and `_.getAudioTimeline()`.
 7. **When in doubt:** Read the `README.md` — it's comprehensive and up-to-date. The `TODO.md` tracks planned features and completed work.
+
+## 6. File Editing Best Practices for AI Agents
+
+When editing files in this project, follow these rules to avoid stray characters and incomplete edits:
+
+1. **Always complete edits fully.** After using `replace_in_file`, re-read the modified section to confirm the replacement was applied correctly and no partial content remains.
+2. **No stray arrows or markers.** Never leave `->`, `=>`, `→`, or other arrow-like characters in code or text unless they are syntactically valid for the language. If an edit introduces an arrow, verify it is intentional and correct.
+3. **Verify syntax after every edit.** After modifying a `.js` file, run `node --check <file>` to catch syntax errors before proceeding.
+4. **Use exact SEARCH matches.** The `replace_in_file` tool replaces only the first match. Ensure your SEARCH block is unique and matches character-for-character, including whitespace and indentation.
+5. **Don't abandon edits mid-way.** If a multi-step edit is needed, complete all steps before moving on. If an edit fails, diagnose the cause and retry — do not leave the file in a half-edited state.
+6. **Review before committing.** After all edits are done, scan the full file once more to ensure no stray characters, leftover comments, or incomplete replacements remain.
+7. **Test the full pipeline.** After engine changes, run `node anim_template.js` and verify both `visual.mp4` and `audio.mp4` are produced without errors.
+8. **Do not use JSDoc comments.** Keep comments short and avoid redundance.

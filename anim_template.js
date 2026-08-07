@@ -19,9 +19,11 @@ _.setProp({
     fontSize: 80,
     maxWidth: 960,
     boldSymbol: "*",
-    colorSymbol: [{color: "#FF6060", symbol: "_"}],
     segmentSymbol: ";",
-    escapeSymbol: "\\"
+    escapeSymbol: "\\",
+    colorSymbol: [
+        {color: "#FF6060", symbol: "_"},
+    ],
 });
 
 _.setBackgroundColor("#000080");

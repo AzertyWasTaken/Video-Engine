@@ -1,4 +1,4 @@
-﻿# Anim
+# Anim
 
 This project contains a Node.js/Canvas + FFmpeg pipeline to generate animated math videos with rich text, audio, and custom effects.
 
@@ -17,7 +17,7 @@ Each `anim_*.js` file is a self-contained entry point that:
 
 ### `package.json`
 
-{ "type": "module" }, dep: @napi-rs/canvas
+{ `"type": "module"`, dep: `@napi-rs/canvas` }
 
 ### `Engine/engine.js`
 
@@ -27,7 +27,7 @@ Exports the `Engine` object (aliased `_` in animation scripts), which maintains 
 
 ### `Engine/textParser.js`
 
-Handles rich text tokenization (`*bold*` markup), width measurement, line wrapping, and segment splitting (`;` for timed text chunks).
+Handles text tokenization (bold, color, escape markup), width measurement, line wrapping, and segment splitting (configurable symbol for timed text chunks). Uses a module-level 1x1 canvas singleton for `measureText()` calls.
 
 ### `Engine/render.js`
 
@@ -47,6 +47,7 @@ await record(CONFIG, visual, duration, callerPath)
 - `visual` — visual events array (from `_.getVisualTimeline()`)
 - `duration` — total seconds (from `_.getDuration()`)
 - `callerPath` — `import.meta.url` of the calling script; defaults to the calling file's directory
+- Returns the path to the output file (`visual.mp4`)
 
 ### `Engine/addSounds.js`
 
@@ -94,13 +95,14 @@ _.changeProp(key, n) // Increment/decrement a default property (e.g. "posY", 80)
 | `posY` | `0` | Vertical offset from center (before alignment) |
 | `alignY` | `0` | Vertical alignment: `-1` (top), `0` (center), `1` (bottom) |
 | `maxWidth` | `Infinity` | Line-wrap threshold in pixels |
-| `richText` | `false` | Enable `*bold*` markup parsing |
-| `segmentedText` | `false` | Enable `;` segment splitting (delays between chunks) |
+| `boldSymbol` | `null` | Enable bold markup parsing with the selected symbol (e.g. `"*"`) |
+| `colorSymbol` | `[]` | Enable color markup parsing with selected symbols (`[{color, symbol}]`) |
+| `segmentSymbol` | `null` | Enable segment splitting with the selected symbol (e.g. `";"`) |
+| `escapeSymbol` | `null` | Enable escaping special characters with the selected symbol (e.g. `"\\"`) |
 | `effect` | `false` | Enable yellow flash on newly spawned text (0.5s) |
 | `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
 | `autoDelay` | `false` | Auto-compute delay per entry in `newTextSection` based on text length |
 | `onTextSegment` | `() => {}` | Callback per segment `(textLength) => void` |
-| `textDelay` | `0` | Delay (seconds) before text appears after spawn |
 | `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
 | `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
 
@@ -108,7 +110,7 @@ Properties passed directly to `_.newText({...})` are merged on top of the persis
 
 #### `_.setText(id, text)`
 
-Replaces text for an existing id: calls `_.clear(id)` to end the old event, then creates a new text event with the same prior configuration (except `effect`, `autoSetPosY`, `textDelay`, and `fadeIn` are forced to `false`/`0`).
+Replaces text for an existing id: calls `_.clear(id)` to end the old event, then creates a new text event with the same prior configuration (except `effect`, `autoSetPosY`, and `fadeIn` are forced to `false`/`0`).
 
 #### `_.newTextSection(newProp, textArray)`
 
@@ -117,39 +119,57 @@ Adds grouped text with shared properties and per-entry vertical offsets and dela
 - `textArray` is an array of **entry objects**.
 - **Object format (preferred):** each entry is a text config object with two optional named properties:
   - `offsetY` — vertical offset from the previous entry (default `0`)
-  - `delay` — seconds to wait after this entry appears (default `0`)
+  - `delay` — seconds to wait after this entry appears. Can be a number or a function `(textLength) => number` (default `0`)
   - All other properties are passed through to `_.newText()` as text config.
 - Each entry calls `_.newText()` with the shared `newProp` merged with the entry's config, then advances `posY` by `offsetY` and waits `delay` seconds.
 - After all entries, `_.centerText(prop.id, savedPosY)` centers the group.
 - **Side-effect free:** `textConfig.posY` is saved and restored, so `newTextSection` does not leak `posY` mutations into subsequent calls.
 - **`autoDelay` option:** when `autoDelay: true` is set in `newProp`, any entry without an explicit `delay` gets a delay auto-computed from its text length (`Math.floor(text.length / 12 + 2) / 2`), matching the segmented-text timing pattern.
+- **`delay` as a function:** when `delay` is a function, it is called with the entry's text length and should return the number of seconds to wait. This is useful for auto-paced text sections:
+
+```js
+function textDelay(length) {
+    return Math.floor(length / 12 + 2) / 2;
+}
+
+_.newTextSection({alignY: 1, autoSetPosY: true}, [
+    {text: "Auto delay entry one", offsetY: 40, delay: textDelay},
+    {text: "Auto delay entry two with more text", offsetY: 80, delay: textDelay},
+]);
+```
 
 ```js
 // Object format (preferred)
 _.newTextSection({alignY: 1, autoSetPosY: true}, [
     {text: "Font color", fontColor: "#FFE040", offsetY: 40, delay: 1},
     {text: "Font family", fontFamily: "Times New Roman", offsetY: 80},
-    {text: "Just a long text block; for *testing* purposes.", maxWidth: 800, offsetY: 80, delay: 3},
-]);
-
-// autoDelay — delays computed from text length automatically
-_.newTextSection({alignY: 1, autoSetPosY: true, autoDelay: true}, [
-    {text: "Auto delay entry one", offsetY: 40},
-    {text: "Auto delay entry two with more text", offsetY: 80},
+    {text: "Just a long _text_ block; for *testing* purposes.", segmentSymbol: null, maxWidth: 800, offsetY: 80, delay: 3},
 ]);
 ```
 
-### Rich text markup
+### Text markup
 
-When `richText: true`, the text is parsed for `*bold*` markers:
+Text markup is configured via symbol-based properties. Each markup type is enabled by setting its corresponding symbol property to a non-null (or non-empty) value. Symbols can be configured globally via `_.setProp()` or overridden per-call in `_.newText()`.
+
+#### Bold markup (`boldSymbol`)
+
+When `boldSymbol` is set (not null), the text is parsed for bold markers using that symbol. For example, with `boldSymbol: "*"`:
 
 - `*bold text*` renders with `fontWeight: 700`
 - Non-starred segments use the configured `fontWeight`
-- Asterisks are consumed and not rendered
+- The bold symbol characters are consumed and not rendered
 
-### Segmented text
+#### Color markup (`colorSymbol`)
 
-When `segmentedText: true`, each line is split by `;` into timed chunks. The `onTextSegment` callback fires after each chunk, typically used to play a click sound and wait:
+When `colorSymbol` is set to an array of `{color, symbol}` pairs, the text is parsed for color markers using those symbols. For example, with `colorSymbol: [{color: "#FF6060", symbol: "_"}]`:
+
+- `_text_` between matching symbols renders with the specified `color`
+- Colors stack and can be nested
+- The symbol characters are consumed and not rendered
+
+#### Segment splitting (`segmentSymbol`)
+
+When `segmentSymbol` is set (not null), each line is split by that symbol into timed chunks. The `onTextSegment` callback fires after each chunk, typically used to play a click sound and wait:
 
 ```js
 onTextSegment: (textLength) => {
@@ -158,11 +178,33 @@ onTextSegment: (textLength) => {
 }
 ```
 
+#### Escaping special characters (`escapeSymbol`)
+
+When `escapeSymbol` is set (not null), special characters (bold, color, and segment symbols) can be escaped by prefixing them with the escape symbol. For example, with `escapeSymbol: "\\"`:
+
+- `\*` renders a literal `*` instead of starting bold
+- `\_` renders a literal `_` instead of starting a color span
+- `\;` renders a literal `;` instead of splitting a segment
+- `\\` renders a literal `\`
+
+```js
+_.newText({text: "Use \\\\ to *escape*; special characters (like \\* or \\;)."});
+```
+
+#### Disabling markup per-call
+
+Any markup symbol can be overridden per-call. To disable a globally-enabled markup for a specific text event, set the symbol to null in the `_.newText()` call:
+
+```js
+// Disable segment splitting for this text only
+_.newText({text: "This has a ; that should not split.", segmentSymbol: null});
+```
+
 ### Visuals
 
 ```js
 _.setBackgroundColor("#101020") // Set background at current time
-_.newCircle(id, posX, posY) // Add a circle at (posX, posY) from center
+_.newCircle(id, posX, posY, diameter, color) // Add a circle at (posX, posY) from center with given diameter and color
 _.newImage(id, src, posX, posY, width, height) // Add an image overlay at (posX, posY) from center
 _.clear(id) // End all active events with matching id
 _.centerText(idSet, posY) // Vertically center a group of ids around posY
@@ -201,10 +243,10 @@ _.clear(id) // text event ends at time = 3
 ## Text rendering pipeline
 
 1. Input text string
-2. `tokenizeRichText()` — parse **bold** markers token array `[{text, bold}, ...]`
+2. `tokenizeBoldText()` — parse bold, color, and escape markers into token array `[{text, bold, color}, ...]`
 3. `chunkTokens()` — split tokens into word/space chunks
-4. `splitLines()` — measure widths, wrap at maxWidth lines of chunks
-5. `segTextLine()` — split chunks at ; (if segmentedText) `["wait", {text, bold}, ...]`
+4. `splitLines()` — measure widths, wrap at maxWidth
+5. `segTextLine()` — split chunks at `segmentSymbol` (if not null) → `["wait", {text, bold, color}, ...]`
 6. `pushTextLine()` — measure each segment, compute x-positions, push visual events
 7. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
 
@@ -247,15 +289,15 @@ This produces:
 2. **Import** the Engine and helpers:
 
    ```js
-   import {Engine as _} from "../Anim/Engine/engine.js";
-   import {record} from "../Anim/Engine/record.js";
-   import {addSounds} from "../Anim/Engine/addSounds.js";
+   import {Engine as _} from "./Engine/engine.js";
+   import {record} from "./Engine/record.js";
+   import {addSounds} from "./Engine/addSounds.js";
    ```
 
 3. **Set CONFIG** (width, height, FPS).
 4. **Set defaults** with `_.setProp({...})` and `_.setBackgroundColor(...)`.
 5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.sound()`, etc.
-6. **Call** `await record(CONFIG, visual, duration, filename);` and `addSounds(audio, duration, filename);` to produce `visual.mp4` and `audio.mp4`.
+6. **Call** `await record(CONFIG, visual, duration, callerPath);` and `addSounds(audio, duration, callerPath);` to produce `visual.mp4` and `audio.mp4`.
 
 **Always pass `import.meta.url` as the last argument** to `record()` and `addSounds()` — this ensures output files are written next to your animation script, not in a random CWD.
 
@@ -268,7 +310,8 @@ This produces:
 | Missing audio in output | `addSounds()` commented out | Uncomment `addSounds()` to enable it |
 | Audio out of sync | Audio `start` depends on `time` cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.sound()` match intended timing |
 | Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
-| Bold not rendering | `richText` is `false` by default | Enable `_.setProp({richText: true})` or pass in `newText()` |
+| Bold not rendering | `boldSymbol` is `null` by default | Set `_.setProp({boldSymbol: "*"})` or pass in `newText()` |
+| Segment not splitting | `segmentSymbol` is `null` by default | Set `_.setProp({segmentSymbol: ";"})` or pass in `newText()` |
 | "Missing audio file" | Sound path resolved relative to script dir, not CWD | Use paths like `"Sounds/click.wav"` (relative to script) |
 | Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible |
 | `setText` loses config | `textProp[id]` not set (e.g., `newText` never called for that id) | Ensure `_.newText()` was called with the same `id` before `_.setText()` |

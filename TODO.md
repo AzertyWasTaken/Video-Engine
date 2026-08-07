@@ -13,6 +13,8 @@
 - Custom wrapping symbols
 - Text escape bar symbol
 - Text color wrapping symbols
+- Circles color
+- Circles and images fade in and fade out
 
 ## Engine
 
@@ -24,9 +26,9 @@
 
 ## Ideas
 
-- Request single frame option
 - Gradient background
 - Text typing effect
 - Text moving effect
 - Code blocks with font `monospace`
 - Bullet lists
+- Time checkpoints
