@@ -1,7 +1,7 @@
 "use strict";
 import {createCanvas, loadImage} from "@napi-rs/canvas";
 
-let ctx, width, height;
+let canvas, width, height;
 const imageCache = new Map();
 
 // Cache for sorted events to avoid re-sorting every frame.
@@ -10,8 +10,7 @@ let cachedVisualRef = null;
 let cachedSortedEvents = null;
 
 export function setCanvas(WIDTH, HEIGHT) {
-    const canvas = createCanvas(WIDTH, HEIGHT);
-    ctx = canvas.getContext("2d");
+    canvas = createCanvas(WIDTH, HEIGHT);
     width = WIDTH;
     height = HEIGHT;
 }
@@ -29,7 +28,7 @@ function getSortedEvents(visual) {
 
 // Binary search for the first event with start > t (i.e. the first event
 // that has NOT yet started at time t). All events before this index have
-// start <= t and are candidates for being active.
+// `start <= t` and are candidates for being active.
 function findFirstActive(sortedEvents, t) {
     let lo = 0;
     let hi = sortedEvents.length;
@@ -69,9 +68,10 @@ function getTextOpacity(obj, t) {
 }
 
 export function render(visual, t) {
-    if (!width || !height || !ctx)
+    if (!width || !height || !canvas)
         throw new Error("Missing canvas property");
 
+    const ctx = canvas.getContext("2d");
     const objects = [];
     pushRelevantObjects(objects, t, visual);
 
@@ -86,27 +86,35 @@ export function render(visual, t) {
     ctx.textBaseline = "middle";
 
     for (const obj of objects) {
-        if (obj.type === "text") {
-            // Compute opacity for fadeIn / fadeOut
-            const opacity = getTextOpacity(obj, t);
-            if (opacity <= 0) continue;
+        // Compute opacity for fadeIn / fadeOut
+        const opacity = getTextOpacity(obj, t);
+        if (opacity <= 0) continue;
+        ctx.globalAlpha = opacity;
 
-            if (obj.effect && t - obj.start < 0.5) {
-                ctx.fillStyle = "#FFFF40";
+        if (obj.type === "text") {
+            if (t - obj.start < obj.flashDuration) {
+                ctx.fillStyle = obj.flashColor;
             } else {
                 ctx.fillStyle = obj.fontColor;
             }
 
             ctx.font = `${obj.fontWeight} ${obj.fontSize}px ${obj.fontFamily}`;
-            ctx.globalAlpha = opacity;
             ctx.fillText(obj.text, width / 2 + obj.posX, height / 2 + obj.posY);
-            ctx.globalAlpha = 1;
         }
         else if (obj.type === "circle") {
             ctx.beginPath();
             ctx.arc(width / 2 + obj.posX, height / 2 + obj.posY, obj.diameter, 0, 2 * Math.PI);
-            ctx.fillStyle = "#FFFFFF";
+            ctx.fillStyle = obj.color;
             ctx.fill();
+        }
+        else if (obj.type === "line") {
+            ctx.beginPath();
+            const [posX, posY] = [width / 2 + obj.posX, height / 2 + obj.posY];
+            ctx.moveTo(posX - obj.lengthX / 2, posY - obj.lengthY / 2);
+            ctx.lineTo(posX + obj.lengthX / 2, posY + obj.lengthY / 2);
+            ctx.strokeStyle = obj.color;
+            ctx.lineWidth = obj.lineWidth;
+            ctx.stroke();
         }
         else if (obj.type === "image") {
             const img = imageCache.get(obj.src);
@@ -118,16 +126,16 @@ export function render(visual, t) {
                 );
             }
         }
+
+        ctx.globalAlpha = 1;
     }
 
-    return ctx.getImageData(0, 0, width, height);
+    return canvas;
 }
 
 // Preload an image so it's available during rendering.
 // `cacheKey` defaults to `src` but can be set to a different value so that
-// the key used during preloading matches the key used during rendering
-// (e.g. when the path is resolved to an absolute path for loading but the
-// original relative path is used as the lookup key in render()).
+// the key used during preloading matches the key used during rendering.
 export async function loadImageAsset(src, cacheKey = src) {
     if (imageCache.has(cacheKey)) return imageCache.get(cacheKey);
     const img = await loadImage(src);

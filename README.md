@@ -2,6 +2,8 @@
 
 This project contains a Node.js/Canvas + FFmpeg pipeline to generate animated math videos with rich text, audio, and custom effects.
 
+> **Agent tip:** For implementation notes, performance considerations, and editing guidance, see [AGENTS.md](./AGENTS.md).
+
 ## What each module does
 
 ### Animation scripts (`anim_*.js`)
@@ -17,7 +19,14 @@ Each `anim_*.js` file is a self-contained entry point that:
 
 ### `package.json`
 
-{ `"type": "module"`, dep: `@napi-rs/canvas` }
+```json
+{
+    "type": "module",
+    "dependencies": {
+        "@napi-rs/canvas": "^0.1.97"
+    }
+}
+```
 
 ### `Engine/engine.js`
 
@@ -33,11 +42,13 @@ Handles text tokenization (bold, color, escape markup), width measurement, line 
 
 Per-frame Canvas renderer (cached sort + binary search).
 
-Takes the visual timeline and a time `t`, draws all active objects to a Canvas, and returns `ImageData`. Uses cached sorted events with binary search for efficient per-frame filtering.
+Takes the visual timeline and a time `t`, draws all active objects to a Canvas, and returns the Canvas. `record.js` then extracts `ImageData` via `canvas.getContext('2d').getImageData(...)` for FFmpeg streaming. Uses cached sorted events with binary search for efficient per-frame filtering.
+
+**Cache caveat:** The sorted-events cache is invalidated when the `visual` array **reference** changes, not when its contents change. If you mutate the array in-place, use `_.getVisualTimeline()` to get the latest reference before rendering.
 
 ### `Engine/record.js`
 
-Spawns FFmpeg, writes consecutive RGBA frames (at `CONFIG.FPS`) to stdin, and produces `visual.mp4`.
+Spawns FFmpeg, writes consecutive RGBA frames (at `CONFIG.FPS`) to stdin, and produces `visual.mp4`. Also preloads image assets referenced in the visual timeline (via `loadImageAsset()`), resolving paths relative to the calling script's directory.
 
 ```js
 await record(CONFIG, visual, duration, callerPath)
@@ -54,12 +65,12 @@ await record(CONFIG, visual, duration, callerPath)
 Takes the audio timeline, delays each sound file via FFmpeg `adelay`, mixes them with `amix`, and produces `audio.mp4`. If no audio events have a `sound` property, it remuxes `visual.mp4` with a silent AAC track instead.
 
 ```js
-addSounds(audio, duration, callerPath)
+addSounds(audio, duration, callerFilePath)
 ```
 
 - `audio` — audio events array (from `_.getAudioTimeline()`)
 - `duration` — total seconds (from `_.getDuration()`)
-- `callerPath` — (optional) `import.meta.url` of the calling script; defaults to the calling file's directory
+- `callerFilePath` — (optional) `import.meta.url` of the calling script; defaults to the calling file's directory
 
 ## Engine API
 
@@ -78,7 +89,7 @@ _.getDuration() // Total elapsed time
 _.newText(textConfig); // Add a text event at the current time cursor
 _.setText(id, text) // Replace text of an existing id (clears old, creates new)
 _.setProp({...}) // Set default properties for subsequent newText calls — merges into persistent defaults
-_.changeProp(key, n) // Increment/decrement a default property (e.g. "posY", 80)
+_.changeProp({key: delta}) // Increment/decrement numeric default properties (e.g. {posY: 80}). Throws on non-numeric values.
 ```
 
 #### Text configuration properties
@@ -99,10 +110,11 @@ _.changeProp(key, n) // Increment/decrement a default property (e.g. "posY", 80)
 | `colorSymbol` | `[]` | Enable color markup parsing with selected symbols (`[{color, symbol}]`) |
 | `segmentSymbol` | `null` | Enable segment splitting with the selected symbol (e.g. `";"`) |
 | `escapeSymbol` | `null` | Enable escaping special characters with the selected symbol (e.g. `"\\"`) |
-| `effect` | `false` | Enable yellow flash on newly spawned text (0.5s) |
+| `flashDuration` | `0` | Flash duration on newly spawned text (disabled if 0) |
+| `flashColor` | `"#FFFF60"` | Flash color on newly spawned text |
+| `autoSetPosX` | `false` | Auto-increment `posX` for chained `newText` calls |
 | `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
-| `autoDelay` | `false` | Auto-compute delay per entry in `newTextSection` based on text length |
-| `onTextSegment` | `() => {}` | Callback per segment `(textLength) => void` |
+| `onTextSegment` | `() => {}` | Callback `(textLength) => void`. Fires when a `"wait"` marker is encountered during `pushTextLine()`, and once more at the end of `newText()` with the remaining accumulated `textLength`. |
 | `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
 | `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
 
@@ -110,41 +122,12 @@ Properties passed directly to `_.newText({...})` are merged on top of the persis
 
 #### `_.setText(id, text)`
 
-Replaces text for an existing id: calls `_.clear(id)` to end the old event, then creates a new text event with the same prior configuration (except `effect`, `autoSetPosY`, and `fadeIn` are forced to `false`/`0`).
-
-#### `_.newTextSection(newProp, textArray)`
-
-Adds grouped text with shared properties and per-entry vertical offsets and delays.
-
-- `textArray` is an array of **entry objects**.
-- **Object format (preferred):** each entry is a text config object with two optional named properties:
-  - `offsetY` — vertical offset from the previous entry (default `0`)
-  - `delay` — seconds to wait after this entry appears. Can be a number or a function `(textLength) => number` (default `0`)
-  - All other properties are passed through to `_.newText()` as text config.
-- Each entry calls `_.newText()` with the shared `newProp` merged with the entry's config, then advances `posY` by `offsetY` and waits `delay` seconds.
-- After all entries, `_.centerText(prop.id, savedPosY)` centers the group.
-- **Side-effect free:** `textConfig.posY` is saved and restored, so `newTextSection` does not leak `posY` mutations into subsequent calls.
-- **`autoDelay` option:** when `autoDelay: true` is set in `newProp`, any entry without an explicit `delay` gets a delay auto-computed from its text length (`Math.floor(text.length / 12 + 2) / 2`), matching the segmented-text timing pattern.
-- **`delay` as a function:** when `delay` is a function, it is called with the entry's text length and should return the number of seconds to wait. This is useful for auto-paced text sections:
+Replaces text for an existing id: calls `_.clear(id, true)` to end the old event (skipping fade-out), then creates a new text event with the same prior configuration (except `flashDuration` is forced to `0`, `autoSetPosX` and `autoSetPosY` are forced to `false`, and `fadeIn` is forced to `0`). All other properties — including `fadeOut` — are preserved from the original `textProp[id]` config.
 
 ```js
 function textDelay(length) {
     return Math.floor(length / 12 + 2) / 2;
 }
-
-_.newTextSection({alignY: 1, autoSetPosY: true}, [
-    {text: "Auto delay entry one", offsetY: 40, delay: textDelay},
-    {text: "Auto delay entry two with more text", offsetY: 80, delay: textDelay},
-]);
-```
-
-```js
-// Object format (preferred)
-_.newTextSection({alignY: 1, autoSetPosY: true}, [
-    {text: "Font color", fontColor: "#FFE040", offsetY: 40, delay: 1},
-    {text: "Font family", fontFamily: "Times New Roman", offsetY: 80},
-    {text: "Just a long _text_ block; for *testing* purposes.", segmentSymbol: null, maxWidth: 800, offsetY: 80, delay: 3},
-]);
 ```
 
 ### Text markup
@@ -187,6 +170,8 @@ When `escapeSymbol` is set (not null), special characters (bold, color, and segm
 - `\;` renders a literal `;` instead of splitting a segment
 - `\\` renders a literal `\`
 
+> **Note:** The escape character itself is consumed during parsing — it does not appear in the rendered output. The next character after the escape is rendered verbatim (skipping bold/color/segment parsing).
+
 ```js
 _.newText({text: "Use \\\\ to *escape*; special characters (like \\* or \\;)."});
 ```
@@ -205,10 +190,23 @@ _.newText({text: "This has a ; that should not split.", segmentSymbol: null});
 ```js
 _.setBackgroundColor("#101020") // Set background at current time
 _.newCircle(id, posX, posY, diameter, color) // Add a circle at (posX, posY) from center with given diameter and color
+_.newLine(id, posX, posY, lengthX, lengthY, lineWidth, color) // Add a line from (posX - lengthX/2, posY - lengthY/2) to (posX + lengthX/2, posY + lengthY/2)
 _.newImage(id, src, posX, posY, width, height) // Add an image overlay at (posX, posY) from center
 _.clear(id) // End all active events with matching id
-_.centerText(idSet, posY) // Vertically center a group of ids around posY
+_.centerText(idSet, posX = 0, posY = 0) // Reposition a group of ids so their bounding-box center moves to (posX, posY)
 ```
+
+#### Visual element types
+
+All visual events pushed to the timeline share this structure:
+
+| `type` | Fields | Description |
+| - | - | - |
+| `"background"` | `color`, `start` | Fills the canvas with `color` from `start` onward |
+| `"text"` | `text`, `posX`, `posY`, `fontSize`, `fontColor`, `fontWeight`, `fontFamily`, `fadeIn`, `fadeOut`, `flashDuration`, `flashColor`, `start`, `end?` | Renders a text segment |
+| `"circle"` | `posX`, `posY`, `diameter`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a filled circle |
+| `"line"` | `posX`, `posY`, `lengthX`, `lengthY`, `lineWidth`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a line centered at `(posX, posY)` |
+| `"image"` | `src`, `posX`, `posY`, `width`, `height`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws an image overlay |
 
 ### Timeline access
 
@@ -236,9 +234,9 @@ _.sound("Sounds/click.wav") // audio event starts at time = 3
 _.clear(id) // text event ends at time = 3
 ```
 
-**Rendering rule** (in `render.js`): an event is drawn when `t >= event.start && t < (event.end ?? Infinity)`.
+**Rendering rule** (in `render.js`): an event is drawn when `t >= event.start && t < (event.end ?? Infinity)`. The `fadeIn` and `fadeOut` properties further modulate opacity within this window (see `getTextOpacity()`).
 
-**Recording rule** (in `record.js`): samples `FPS * duration` frames at `t = f / FPS`.
+**Recording rule** (in `record.js`): samples `Math.ceil(FPS * duration)` frames at `t = f / FPS`.
 
 ## Text rendering pipeline
 
@@ -247,8 +245,9 @@ _.clear(id) // text event ends at time = 3
 3. `chunkTokens()` — split tokens into word/space chunks
 4. `splitLines()` — measure widths, wrap at maxWidth
 5. `segTextLine()` — split chunks at `segmentSymbol` (if not null) → `["wait", {text, bold, color}, ...]`
-6. `pushTextLine()` — measure each segment, compute x-positions, push visual events
-7. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
+6. `pushTextLine()` — measure each segment, compute x-positions, push visual events. Calls `prop.onTextSegment(textLength)` when encountering `"wait"` markers.
+7. `newText()` (in engine.js) — calls `prop.onTextSegment(textLength)` once at the end with the remaining accumulated text length
+8. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
 
 ### Size hierarchy
 
@@ -297,7 +296,7 @@ This produces:
 3. **Set CONFIG** (width, height, FPS).
 4. **Set defaults** with `_.setProp({...})` and `_.setBackgroundColor(...)`.
 5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.sound()`, etc.
-6. **Call** `await record(CONFIG, visual, duration, callerPath);` and `addSounds(audio, duration, callerPath);` to produce `visual.mp4` and `audio.mp4`.
+6. **Call** `await record(CONFIG, visual, duration, callerPath);` and `addSounds(audio, duration, callerFilePath);` to produce `visual.mp4` and `audio.mp4`.
 
 **Always pass `import.meta.url` as the last argument** to `record()` and `addSounds()` — this ensures output files are written next to your animation script, not in a random CWD.
 
@@ -316,3 +315,7 @@ This produces:
 | Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible |
 | `setText` loses config | `textProp[id]` not set (e.g., `newText` never called for that id) | Ensure `_.newText()` was called with the same `id` before `_.setText()` |
 | `callerPath` errors | Passed `import.meta.filename` instead of `import.meta.url` | Use `import.meta.url` (a `file://` URL) |
+| `changeProp` throws "Nonnumber values" | Passed a non-numeric delta or the property doesn't exist in `textConfig` | Ensure the property is numeric; use `setProp()` for non-numeric property changes |
+| Image not showing | `loadImageAsset` failed silently | Check console warnings; ensure image path is relative to script dir and file exists |
+| Text misaligned vertically | `alignY` not set correctly | Use `alignY: -1` (top), `0` (center), or `1` (bottom) |
+| Text not centered horizontally | `posX` offsets not accounted for | Use `centerText()` to reposition a group after positioning |

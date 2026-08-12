@@ -1,7 +1,8 @@
 "use strict";
 import {
     getSegmentsWidth,
-    wrapBoldTextSegments
+    wrapBoldTextSegments,
+    measureTextWidth
 } from "./textParser.js";
 
 const visual = [];
@@ -26,11 +27,13 @@ const textConfig = {
     segmentSymbol: null, // Enable segment splitting with selected symbol
     escapeSymbol: null, // Enable escaping special characters with selected symbol
 
-    effect: false, // Enable yellow flash on newly spawned text (0.5s)
     fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
     fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+    autoSetPosX: false, // Auto-increment posX for chained texts
     autoSetPosY: false, // Auto-increment posY for chained texts
-    autoDelay: false, // Auto-compute delay per entry in newTextSection based on text length
+
+    flashDuration: 0, // Flash duration on newly spawned text (disabled if 0)
+    flashColor: "#FFFF60", // Flash color on newly spawned text
 
     onTextSegment: () => {}, // Callback per segment (textLength) => void
 };
@@ -40,18 +43,38 @@ const textProp = {};
 let time = 0;
 let textLength = 0;
 
+function getItemSize(item) {
+    switch (item.type) {
+        case "text": return {x: measureTextWidth(item), y: item.fontSize};
+
+        case "circle": return {x: item.diameter, y: item.diameter};
+
+        case "line": return {x: item.lengthX + item.lineWidth, y: item.lengthY + item.lineWidth};
+
+        case "image": return {x: item.width, y: item.height};
+
+        default: throw new Error(`Invalid item type ${item.type}`);
+    }
+}
+
+// Get the center point of grouped `id` items
 function getGroupCenter(id) {
-    let minHeight = 0;
-    let maxHeight = 0;
+    const minSize = {x: 0, y: 0};
+    const maxSize = {x: 0, y: 0};
 
     visual.forEach((value) => {
         if (id.has(value.id)) {
-            minHeight = Math.min(minHeight, value.posY);
-            maxHeight = Math.max(maxHeight, value.posY);
+            const itemSize = getItemSize(value);
+
+            minSize.x = Math.min(minSize.x, value.posX - itemSize.x / 2);
+            minSize.y = Math.min(minSize.y, value.posY - itemSize.y / 2);
+
+            maxSize.x = Math.max(maxSize.x, value.posX + itemSize.x / 2);
+            maxSize.y = Math.max(maxSize.y, value.posY + itemSize.y / 2);
         }
     });
 
-    return (minHeight + maxHeight) / 2;
+    return {x: (minSize.x + maxSize.x) / 2, y: (minSize.y + maxSize.y) / 2};
 }
 
 function pushTextSegment(prop, seg, posX, posY) {
@@ -65,7 +88,8 @@ function pushTextSegment(prop, seg, posX, posY) {
         fontSize: prop.fontSize,
         fontColor: seg.color ?? prop.fontColor,
         fontWeight: seg.bold ? 700 : prop.fontWeight,
-        effect: prop.effect,
+        flashDuration: prop.flashDuration,
+        flashColor: prop.flashColor,
         fadeIn: prop.fadeIn,
         fadeOut: prop.fadeOut,
         start: time
@@ -99,6 +123,8 @@ function pushTextLine(prop, segments, linePosY) {
             textLength = 0;
         }
     }
+
+    return totalWidth;
 }
 
 export const Engine = {
@@ -114,26 +140,54 @@ export const Engine = {
         visual.push({type: "background", color: color, start: time});
     },
 
+    getProp(key) {
+        return textConfig[key];
+    },
+
     setProp(newProp) {
         for (const key in newProp) {
             textConfig[key] = newProp[key];
         }
     },
 
-    changeProp(key, value) {
-        textConfig[key] += value;
+    changeProp(newProp) {
+        for (const key in newProp) {
+            const keyA = textConfig[key];
+            const keyB = newProp[key];
+
+            if (!isFinite(keyA) || !isFinite(keyB))
+                throw new Error(`Nonnumber values are not accepted: ${keyA}, ${keyB}`);
+
+            textConfig[key] += keyB;
+        }
     },
 
     newCircle(id, posX, posY, diameter, color) {
         visual.push({
             type: "circle",
-            id: id,
-            posX: posX,
-            posY: posY,
-            diameter: diameter,
+            id,
+            posX,
+            posY,
+            diameter,
             color,
-            fadeIn,
-            fadeOut,
+            fadeIn: textConfig.fadeIn,
+            fadeOut: textConfig.fadeOut,
+            start: time
+        });
+    },
+
+    newLine(id, posX, posY, lengthX, lengthY, lineWidth, color) {
+        visual.push({
+            type: "line",
+            id,
+            posX,
+            posY,
+            lengthX,
+            lengthY,
+            lineWidth,
+            color,
+            fadeIn: textConfig.fadeIn,
+            fadeOut: textConfig.fadeOut,
             start: time
         });
     },
@@ -147,8 +201,8 @@ export const Engine = {
             posY: posY,
             width: width,
             height: height,
-            fadeIn,
-            fadeOut,
+            fadeIn: textConfig.fadeIn,
+            fadeOut: textConfig.fadeOut,
             start: time
         });
     },
@@ -167,77 +221,58 @@ export const Engine = {
         // Adjust y-position depending of `prop.alignY`
         posY += totalHeight * prop.alignY / 2;
 
-        if (prop.autoSetPosY) textConfig.posY += totalHeight;
-
+        let totalWidth = 0;
         for (let i = 0; i < lines.length; i++) {
             const lineSegments = lines[i];
-            pushTextLine(prop, lineSegments, posY);
+            const lineWidth = pushTextLine(prop, lineSegments, posY);
+            totalWidth = Math.max(totalWidth, lineWidth);
             posY += lineHeight;
         }
 
         textProp[prop.id] = prop;
         prop.onTextSegment(textLength);
         textLength = 0;
+
+        if (prop.autoSetPosX) textConfig.posX += totalWidth;
+        if (prop.autoSetPosY) textConfig.posY += totalHeight;
     },
 
-    newTextSection(newProp, textArray) {
-        const prop = {...textConfig, ...newProp};
-        const savedPosY = prop.posY;
-        // Save textConfig.posY so we can restore it — newTextSection must not
-        // leak posY mutations into the global textConfig (side-effect free).
-        const savedConfigPosY = textConfig.posY;
-
-        for (const entry of textArray) {
-            // Object: {text: "...", offsetY: 40, delay: 1, ...textProps}
-            const {offsetY = 0, delay = 0, ...entryConfig} = entry;
-
-            // Auto-compute delay from text length when autoDelay is enabled
-            // and no explicit delay was given.
-            const delaySec = typeof delay === "function"
-            ? delay(entryConfig.text.length) : delay;
-
-            prop.posY = textConfig.posY;
-            Engine.newText({...prop, ...entryConfig});
-            Engine.changeProp("posY", offsetY);
-            Engine.wait(delaySec);
-        }
-
-        Engine.centerText(prop.id, savedPosY);
-        // Restore textConfig.posY to avoid side effects on subsequent calls.
-        textConfig.posY = savedConfigPosY;
-    },
-
-    setText(id, text) {
-        Engine.clear(id, true);
+    setText(id, text, fade = 0) {
+        Engine.clear(id, fade);
+        Engine.wait(-fade);
 
         Engine.newText({
             ...textProp[id],
             text,
-            effect: false,
+            flashDuration: 0,
+            autoSetPosX: false,
             autoSetPosY: false,
-            fadeIn: 0,
+            fadeIn: fade,
         });
+
+        Engine.wait(fade);
     },
 
-    centerText(id, posY = 0) {
+    centerText(id, posX = null, posY = null) {
         if (typeof id !== "object") id = new Set([id]);
 
         const center = getGroupCenter(id);
 
         visual.forEach((value) => {
             if (id.has(value.id)) {
-                value.posY += posY - center;
+                if (posX !== null) value.posX += posX - center.x;
+                if (posY !== null) value.posY += posY - center.y;
             }
         });
     },
 
-    clear(id, noFadeOut) {
+    clear(id, fadeOut) {
         if (typeof id !== "object") id = new Set([id]);
 
         visual.forEach((value) => {
             if (id.has(value.id)) {
                 value.end ??= time;
-                if (noFadeOut) value.fadeOut = 0;
+                if (fadeOut) value.fadeOut = fadeOut;
             }
         });
     },

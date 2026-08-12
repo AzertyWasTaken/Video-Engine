@@ -15,20 +15,33 @@
 - Text color wrapping symbols
 - Circles color
 - Circles and images fade in and fade out
+- Custom flash effect color and duration
+- Draw lines
+- `centerText` includes circles, lines and images
+- `centerText` accepts x axis
+- autoSetPosX option
 
 ## Engine
 
 - [ ] Balanced width text wrapping
 - [ ] Exponentiation wrapping `$`
-- [ ] Draw lines
-- [ ] Fixed duration text
-- [ ] Support special characters
+- [ ] Last delay option
+- [ ] Properties legacy
+- [ ] Moving effect
+- [ ] Revamp fading and flash effect
+- [ ] Blend texts with additive compensation
+- [ ] autoSetPos align option
+
+`render.js` must accept only tweening with smooth transitions.
 
 ## Ideas
 
 - Gradient background
 - Text typing effect
-- Text moving effect
 - Code blocks with font `monospace`
 - Bullet lists
-- Time checkpoints
+- Support special characters
+- Break text line
+- Size changing effect
+- Color changing effect
+- Fading set text option

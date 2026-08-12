@@ -85,6 +85,11 @@ function measureChunkWidth(chunk, prop) {
     return ctx.measureText(chunk.text).width;
 }
 
+export function measureTextWidth(item) {
+    ctx.font = `${item.fontWeight} ${item.fontSize}px ${item.fontFamily}`;
+    return ctx.measureText(item.text).width;
+}
+
 export function getSegmentsWidth(prop, segments) {
     let totalWidth = 0;
 

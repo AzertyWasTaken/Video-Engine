@@ -33,14 +33,16 @@ function getFFMPEG(CONFIG, outputFile) {
 }
 
 export async function record(CONFIG, visual, duration, callerPath) {
+    const {FPS, WIDTH, HEIGHT} = CONFIG;
+
     const resolvedPath = resolveCallerPath(callerPath);
     const videoDir = path.dirname(resolvedPath);
     const outputFile = path.join(videoDir, "visual.mp4");
 
-    const totalFrames = Math.ceil(CONFIG.FPS * duration);
+    const totalFrames = Math.ceil(FPS * duration);
 
     const ffmpeg = getFFMPEG(CONFIG, outputFile);
-    setCanvas(CONFIG.WIDTH, CONFIG.HEIGHT);
+    setCanvas(WIDTH, HEIGHT);
 
     // Preload any image assets referenced in the visual timeline.
     // Resolve relative paths against the script directory (like sounds).
@@ -60,9 +62,10 @@ export async function record(CONFIG, visual, duration, callerPath) {
     }
 
     for (let f = 0; f < totalFrames; f++) {
-        const t = f / CONFIG.FPS;
+        const t = f / FPS;
 
-        const frame = render(visual, t);
+        const canvas = render(visual, t);
+        const frame = canvas.getContext("2d").getImageData(0, 0, WIDTH, HEIGHT);
         const buffer = Buffer.from(frame.data.buffer);
 
         if (!ffmpeg.stdin.write(buffer)) {

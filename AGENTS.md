@@ -30,7 +30,7 @@ _.sound("Sounds/click.wav") // audio event starts at time = 3
 _.clear(id) // text event ends at time = 3
 ```
 
-**Critical mental model:** Every `_.newText()`, `_.sound()`, `_.setBackgroundColor()`, `_.newCircle()` call is positioned at the **current** `time` cursor. `_.wait()` is the only way to advance time. There is no "absolute time" parameter on events — they all inherit `time` at call-site.
+**Critical mental model:** Every `_.newText()`, `_.sound()`, `_.setBackgroundColor()`, `_.newCircle()`, `_.newLine()`, and `_.newImage()` call is positioned at the **current** `time` cursor. `_.wait()` is the only way to advance time. There is no "absolute time" parameter on events — they all inherit `time` at call-site.
 
 **Gotcha:** If you forget a `_.wait()` at the end of your script, the last events may have zero visible duration. Always ensure the final `_.wait()` covers the time you want the last elements to be visible.
 
@@ -46,8 +46,8 @@ _.clear(id) // text event ends at time = 3
 
 If your FFmpeg is elsewhere:
 
-- **In `Engine/record.js`:** Update the `ffmpegPath` constant (line 7).
-- **In `Engine/addSounds.js`:** Set the `FFMPEG_PATH` environment variable, or update the default fallback (line 7).
+- **In `Engine/record.js`:** Update the `ffmpegPath` constant (line 7), or set the `FFMPEG_PATH` environment variable (takes precedence).
+- **In `Engine/addSounds.js`:** Set the `FFMPEG_PATH` environment variable, or update the default fallback (line 7, variable `ffmpegExecutablePath`).
 
 ### Running
 
@@ -68,7 +68,12 @@ These notes are essential for modifying engine internals:
 - **`getSegmentsWidth()`** is called per line in `pushTextLine()` — it re-measures all segments. This is a performance hotspot if you have many text events.
 - **`record.js`** uses `process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe"` — the env var takes precedence over the hardcoded default.
 - **`addSounds()`** is **synchronous** (uses `execFileSync`), while `record()` is **async** (uses `spawn` with streaming). Call `await record(...)` first, then `addSounds(...)`.
-- **`resolveCallerPath()`** helper handles both `file://` URLs and plain file paths. Always pass `import.meta.url` (a `file://` URL), not `import.meta.filename`.
+- **`resolveCallerPath()`** is defined **locally** in both `record.js` (line 9) and `addSounds.js` (line 9) — it is not a shared module. Both definitions are identical. It handles both `file://` URLs and plain file paths. Always pass `import.meta.url` (a `file://` URL), not `import.meta.filename`.
+- **`changeProp()`** only accepts numeric values — it throws `"Nonnumber values are not accepted"` if `textConfig[key]` or the passed delta is not finite. Use `setProp()` for non-numeric property changes.
+- **`addSounds()` filters for `event.sound`** — only audio events with a `sound` property are processed. Events without it are silently skipped.
+- **`render.js` cache key** — `getSortedEvents()` caches the sorted event list keyed on the `visual` array **reference**. The cache is built once per render loop (in `record.js`) since the same `_.getVisualTimeline()` reference is reused for all frames.
+- **`newLine()`** — renders a line element (`type: "line"`) with `lengthX`/`lengthY` as the vector from the center position. Works with `centerText()` for alignment, just like circles, images, and text.
+- **Visual element types** — see the README's "Visual element types" table for the full field reference for each `type` (`"background"`, `"text"`, `"circle"`, `"line"`, `"image"`).
 
 ## 5. Agent Workflow Tips
 
@@ -76,9 +81,10 @@ These notes are essential for modifying engine internals:
 2. **Before editing `textParser.js`:** The `1×1 canvas` singleton is created at module load. Do not add `createCanvas` calls inside functions — reuse the module-level `ctx`.
 3. **Before editing `render.js`:** This runs `FPS × duration` times. Avoid adding per-frame allocations or expensive operations. The cached sort + binary search optimization should be preserved.
 4. **Before editing `record.js` or `addSounds.js`:** FFmpeg arguments are order-sensitive. Test with short durations first. Both use `resolveCallerPath()` to handle `import.meta.url` vs file paths.
-5. **Testing:** Run `node anim_template.js` to verify the full pipeline. Check `visual.mp4` and `audio.mp4` outputs.
+5. **Testing:** Run `node anim_template.js` to verify the full pipeline. Check `visual.mp4` and `audio.mp4` outputs. Watch for console warnings (e.g., image loading failures, FFmpeg errors).
 6. **Debugging:** Add `console.log` in `engine.js` methods to trace the time cursor and event pushes. The `visual` and `audio` arrays are accessible via `_.getVisualTimeline()` and `_.getAudioTimeline()`.
 7. **When in doubt:** Read the `README.md` — it's comprehensive and up-to-date. The `TODO.md` tracks planned features and completed work.
+8. **Template import paths:** `anim_template.js` uses `../Anim/Engine/...` import paths (lines 4–5). These resolve correctly but are non-standard — new animations should use `./Engine/...` for clarity. The template also stores `import.meta.url` in a `filename` variable and passes it to both `record()` and `addSounds()`.
 
 ## 6. File Editing Best Practices for AI Agents
 
