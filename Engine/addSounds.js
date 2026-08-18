@@ -83,12 +83,12 @@ function resolveSoundFilePath(soundName) {
     return soundName;
 }
 
-function appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex, videoDirectory) {
+function appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex) {
     // Add one -i per audio event that has a sound path (same ordering as `audioEvents` above).
     for (const audioEvent of audioEvents) {
         // Resolve relative to this script so execution cwd doesn't matter.
         const soundName = audioEvent.sound;
-        const resolvedSoundPath = resolveSoundFilePath(soundName, videoDirectory);
+        const resolvedSoundPath = resolveSoundFilePath(soundName);
 
         if (!fs.existsSync(resolvedSoundPath)) {
             throw new Error(
@@ -130,7 +130,7 @@ export function addSounds(rawAudioEvents, videoDuration, callerFilePath) {
     const filterComplex = [filterPartStrings.join(";"), amixFilter].filter(Boolean).join(";");
 
     const ffmpegArgs = ["-y", "-i", videoFilePath];
-    appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex, videoDirectory);
+    appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex);
     appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath);
 
     console.log("Processing...");

@@ -1,6 +1,7 @@
 "use strict";
 import path from 'path';
 import {fileURLToPath} from "url";
+import {Param} from "./param.js";
 import {
     getSegmentsWidth,
     balancedText,
@@ -9,37 +10,6 @@ import {
 
 const visual = [];
 const audio = [];
-
-const textConfig = {
-    id: 0, // Integer or string group identifier (required)
-
-    text: "Hello, world!",
-    fontSize: 80,
-    fontColor: "#FFFFFF",
-    fontFamily: "Arial",
-    fontWeight: 400, // Normal; bold segments use 700
-
-    posX: 0, // Horizontal offset from center
-    posY: 0, // Vertical offset from center (before alignment)
-    alignY: 0, // Vertical alignment: -1 (top), 0 (center), 1 (bottom)
-    maxWidth: Infinity, // Line-wrap threshold (pixels)
-    balancedWidth: false, // Balanced text width
-
-    boldSymbol: null, // Enable bold markup parsing with selected symbol
-    colorSymbol: [], // Enable color markup parsing with selected symbol
-    segmentSymbol: null, // Enable segment splitting with selected symbol
-    escapeSymbol: null, // Enable escaping special characters with selected symbol
-
-    fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
-    fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
-    autoSetPosX: false, // Auto-increment posX for chained texts
-    autoSetPosY: false, // Auto-increment posY for chained texts
-
-    flashDuration: 0, // Flash duration on newly spawned text (disabled if 0)
-    flashColor: "#FFFF60", // Flash color on newly spawned text
-
-    onTextSegment: () => {}, // Callback per segment (textLength) => void
-};
 
 let audioFile = fileURLToPath(import.meta.url);
 
@@ -153,75 +123,78 @@ export const Engine = {
         visual.push({type: "background", color: color, start: time});
     },
 
-    getProp(key) {
-        return textConfig[key];
+    getProp(key, type = "text") {
+        return Param[type][key];
     },
 
-    setProp(newProp) {
+    setProp(newProp, type = "text") {
         for (const key in newProp) {
-            textConfig[key] = newProp[key];
+            Param[type][key] = newProp[key];
         }
     },
 
-    changeProp(newProp) {
+    changeProp(newProp, type = "text") {
         for (const key in newProp) {
-            const keyA = textConfig[key];
+            const keyA = Param[type][key];
             const keyB = newProp[key];
 
             if (!isFinite(keyA) || !isFinite(keyB))
                 throw new Error(`Nonnumber values are not accepted: ${keyA}, ${keyB}`);
 
-            textConfig[key] += keyB;
+            Param[type][key] += keyB;
         }
     },
 
-    newCircle(id, posX, posY, diameter, color) {
+    newCircle(newProp) {
+        const prop = {...Param.circle, ...newProp};
         visual.push({
             type: "circle",
-            id,
-            posX,
-            posY,
-            diameter,
-            color,
-            fadeIn: textConfig.fadeIn,
-            fadeOut: textConfig.fadeOut,
+            id: prop.id,
+            posX: prop.posX,
+            posY: prop.posY,
+            diameter: prop.diameter,
+            color: prop.color,
+            fadeIn: prop.fadeIn,
+            fadeOut: prop.fadeOut,
             start: time
         });
     },
 
-    newLine(id, posX, posY, lengthX, lengthY, lineWidth, color) {
+    newLine(newProp) {
+        const prop = {...Param.line, ...newProp};
         visual.push({
             type: "line",
-            id,
-            posX,
-            posY,
-            lengthX,
-            lengthY,
-            lineWidth,
-            color,
-            fadeIn: textConfig.fadeIn,
-            fadeOut: textConfig.fadeOut,
+            id: prop.id,
+            posX: prop.posX,
+            posY: prop.posY,
+            lengthX: prop.lengthX,
+            lengthY: prop.lengthY,
+            lineWidth: prop.lineWidth,
+            color: prop.color,
+            fadeIn: prop.fadeIn,
+            fadeOut: prop.fadeOut,
             start: time
         });
     },
 
-    newImage(id, src, posX, posY, width, height) {
+    newImage(newProp) {
+        const prop = {...Param.image, ...newProp};
         visual.push({
             type: "image",
-            id: id,
-            src: src,
-            posX: posX,
-            posY: posY,
-            width: width,
-            height: height,
-            fadeIn: textConfig.fadeIn,
-            fadeOut: textConfig.fadeOut,
+            id: prop.id,
+            src: prop.src,
+            posX: prop.posX,
+            posY: prop.posY,
+            width: prop.width,
+            height: prop.height,
+            fadeIn: prop.fadeIn,
+            fadeOut: prop.fadeOut,
             start: time
         });
     },
 
     newText(newProp) {
-        const prop = {...textConfig, ...newProp};
+        const prop = {...Param.text, ...newProp};
         textLength = 0;
 
         // Wrap while preserving bold state across line breaks.
@@ -247,8 +220,8 @@ export const Engine = {
         prop.onTextSegment(textLength);
         textLength = 0;
 
-        if (prop.autoSetPosX) textConfig.posX += totalWidth;
-        if (prop.autoSetPosY) textConfig.posY += totalHeight;
+        if (prop.autoSetPosX) Param.text.posX += totalWidth;
+        if (prop.autoSetPosY) Param.text.posY += totalHeight;
     },
 
     setText(id, text, fade = 0) {

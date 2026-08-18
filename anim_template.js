@@ -1,5 +1,7 @@
 "use strict";
 const filename = import.meta.url;
+import path from "path";
+import {fileURLToPath} from "url";
 import {Engine as _} from "./Engine/engine.js";
 import {record} from "../Anim/Engine/record.js";
 import {addSounds} from "../Anim/Engine/addSounds.js";
@@ -15,7 +17,7 @@ function textDelay(length) {
 }
 
 function onTextSegment(textLength) {
-    _.sound("Sounds/click.wav", 2);
+    _.playSound("Sounds/click.wav", 2);
     _.wait(Math.floor(textLength / 12 + 2) / 2);
 }
 
@@ -33,6 +35,8 @@ _.setProp({
 
 _.setBackgroundColor("#000080");
 
+_.setAudioFile(path.dirname(fileURLToPath(import.meta.url)));
+
 // Text with yellow flash effect
 _.newText({text: "Text example with yellow flash effect.", posY: -300, flashDuration: 0.5});
 _.wait(1);
@@ -42,7 +46,7 @@ _.newText({text: "Text with *a bold* segment.", posY: -60});
 _.wait(1);
 
 // Image
-_.newImage(0, "Images/favicon.png", 0, 240, 256, 256);
+_.newImage({src: "Images/favicon.png", posX: 0, posY: 240, width: 256, height: 256});
 _.wait(1);
 
 // Clear and switch to a new id
@@ -50,8 +54,7 @@ _.clear(0);
 _.setProp({id: 1});
 
 // Segmented text with sound on each segment
-_.newText({
-    text: "This text is so long it; takes multiple lines and; has two segments.", onTextSegment});
+_.newText({text: "This text is so long it; takes multiple lines and; has two segments.", onTextSegment});
 _.wait(2);
 
 _.clear(1);
@@ -93,15 +96,25 @@ _.wait(2);
 _.clear(new Set([3, "text"]), 1);
 
 // Circle visual
-_.setProp({id: 4});
-_.newCircle(4, 0, -120, 40, "#FFFFFF");
+_.setProp({id: "shape"});
+_.newCircle({id: "shape", posX: 0, posY: -120, diameter: 40});
 _.wait(1);
 
 // Line visual
-_.setProp({id: 5});
-_.newLine(5, 0, 120, 480, 0, 16, "#FFFFFF");
+_.newLine({id: "shape", posX: 0, posY: 120, lengthX: 480});
 _.wait(1);
-_.newLine(5, 0, 120, 0, 120, 16, "#FFFFFF");
+_.newLine({id: "shape", posX: 0, posY: 120, lengthY: 120});
+_.wait(1);
+
+_.clear("shape", 1);
+
+// Balanced width
+_.setProp({id: 6});
+_.newText({text: "This multiline text serves to test balanced wrapping option.", posY: -160});
+_.wait(1);
+
+_.setProp({id: 6});
+_.newText({text: "This multiline text serves to test balanced wrapping option.", posY: 160, balancedWidth: true});
 _.wait(1);
 
 // Render video and audio
@@ -111,4 +124,4 @@ const duration = _.getDuration();
 
 console.log(`Duration: ${duration}s`);
 await record(CONFIG, visual, duration, filename);
-addSounds(audio, duration, filename);
+// addSounds(audio, duration, filename);

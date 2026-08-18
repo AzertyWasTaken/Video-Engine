@@ -13,18 +13,21 @@
 - `centerText` accepts x axis
 - autoSetPosX option
 - balanced width text wrapping
+- refractor `textConfig`
 
 ## Engine
 
 - [ ] Bullet lists
+- [ ] Rectangles
+- [ ] Circles and rectangles strokes
 - [ ] Table
 - [ ] Exponentiation wrapping `$`
 - [ ] Last delay option
-- [ ] Properties legacy
 - [ ] Moving effect
 - [ ] Revamp fading and flash effect
 - [ ] Blend texts with additive compensation
-- [ ] autoSetPos align option
+- [ ] `autoSetPos` align option
+- [ ] Global properties
 
 ## Ideas
 
@@ -37,3 +40,4 @@
 - Color changing effect
 - Fading set text option
 - `render.js` accept only tweening with smooth transitions.
+- Module for appending instance objects
