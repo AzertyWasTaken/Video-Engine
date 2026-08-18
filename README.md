@@ -106,6 +106,7 @@ _.changeProp({key: delta}) // Increment/decrement numeric default properties (e.
 | `posY` | `0` | Vertical offset from center (before alignment) |
 | `alignY` | `0` | Vertical alignment: `-1` (top), `0` (center), `1` (bottom) |
 | `maxWidth` | `Infinity` | Line-wrap threshold in pixels |
+| `balancedWidth` | `false` | Decrease the maximum width to make the last line longer. Requires `maxWidth` to be finite. |
 | `boldSymbol` | `null` | Enable bold markup parsing with the selected symbol (e.g. `"*"`) |
 | `colorSymbol` | `[]` | Enable color markup parsing with selected symbols (`[{color, symbol}]`) |
 | `segmentSymbol` | `null` | Enable segment splitting with the selected symbol (e.g. `";"`) |
@@ -144,7 +145,7 @@ When `boldSymbol` is set (not null), the text is parsed for bold markers using t
 
 #### Color markup (`colorSymbol`)
 
-When `colorSymbol` is set to an array of `{color, symbol}` pairs, the text is parsed for color markers using those symbols. For example, with `colorSymbol: [{color: "#FF6060", symbol: "_"}]`:
+When `colorSymbol` is set to an array of `{color, symbol}` pairs, the text is parsed for color markers using those symbols. For example, with `colorSymbol: [{color: "#FFFF60", symbol: "_"}]`:
 
 - `_text_` between matching symbols renders with the specified `color`
 - Colors stack and can be nested
@@ -311,7 +312,7 @@ This produces:
 | Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
 | Bold not rendering | `boldSymbol` is `null` by default | Set `_.setProp({boldSymbol: "*"})` or pass in `newText()` |
 | Segment not splitting | `segmentSymbol` is `null` by default | Set `_.setProp({segmentSymbol: ";"})` or pass in `newText()` |
-| "Missing audio file" | Sound path resolved relative to script dir, not CWD | Use paths like `"Sounds/click.wav"` (relative to script) |
+| "Missing audio file" | Sound path not found via shorthands, script-relative, or CWD-relative resolution | Use `"Sounds/click.wav"` (relative to script), `"#sounds/click.wav"` (`imports` shorthand, see `package.json`), or an absolute path |
 | Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible |
 | `setText` loses config | `textProp[id]` not set (e.g., `newText` never called for that id) | Ensure `_.newText()` was called with the same `id` before `_.setText()` |
 | `callerPath` errors | Passed `import.meta.filename` instead of `import.meta.url` | Use `import.meta.url` (a `file://` URL) |

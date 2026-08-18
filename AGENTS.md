@@ -71,6 +71,7 @@ These notes are essential for modifying engine internals:
 - **`resolveCallerPath()`** is defined **locally** in both `record.js` (line 9) and `addSounds.js` (line 9) — it is not a shared module. Both definitions are identical. It handles both `file://` URLs and plain file paths. Always pass `import.meta.url` (a `file://` URL), not `import.meta.filename`.
 - **`changeProp()`** only accepts numeric values — it throws `"Nonnumber values are not accepted"` if `textConfig[key]` or the passed delta is not finite. Use `setProp()` for non-numeric property changes.
 - **`addSounds()` filters for `event.sound`** — only audio events with a `sound` property are processed. Events without it are silently skipped.
+- **`resolveSoundFilePath()`** in `addSounds.js` throws an error if the sound file does not exist.
 - **`render.js` cache key** — `getSortedEvents()` caches the sorted event list keyed on the `visual` array **reference**. The cache is built once per render loop (in `record.js`) since the same `_.getVisualTimeline()` reference is reused for all frames.
 - **`newLine()`** — renders a line element (`type: "line"`) with `lengthX`/`lengthY` as the vector from the center position. Works with `centerText()` for alignment, just like circles, images, and text.
 - **Visual element types** — see the README's "Visual element types" table for the full field reference for each `type` (`"background"`, `"text"`, `"circle"`, `"line"`, `"image"`).
@@ -97,4 +98,5 @@ When editing files in this project, follow these rules to avoid stray characters
 5. **Don't abandon edits mid-way.** If a multi-step edit is needed, complete all steps before moving on. If an edit fails, diagnose the cause and retry — do not leave the file in a half-edited state.
 6. **Review before committing.** After all edits are done, scan the full file once more to ensure no stray characters, leftover comments, or incomplete replacements remain.
 7. **Test the full pipeline.** After engine changes, run `node anim_template.js` and verify both `visual.mp4` and `audio.mp4` are produced without errors.
-8. **Do not use JSDoc comments.** Keep comments short and avoid redundance.
+8. **Do not use JSDoc comments.** Keep comments short and avoid redundance unless if requested.
+9. **Do not implement backward compatibility.** Unless if requested.

@@ -1,7 +1,9 @@
 "use strict";
+import path from 'path';
+import {fileURLToPath} from "url";
 import {
     getSegmentsWidth,
-    wrapBoldTextSegments,
+    balancedText,
     measureTextWidth
 } from "./textParser.js";
 
@@ -21,6 +23,7 @@ const textConfig = {
     posY: 0, // Vertical offset from center (before alignment)
     alignY: 0, // Vertical alignment: -1 (top), 0 (center), 1 (bottom)
     maxWidth: Infinity, // Line-wrap threshold (pixels)
+    balancedWidth: false, // Balanced text width
 
     boldSymbol: null, // Enable bold markup parsing with selected symbol
     colorSymbol: [], // Enable color markup parsing with selected symbol
@@ -37,6 +40,8 @@ const textConfig = {
 
     onTextSegment: () => {}, // Callback per segment (textLength) => void
 };
+
+let audioFile = fileURLToPath(import.meta.url);
 
 const textProp = {};
 
@@ -132,8 +137,16 @@ export const Engine = {
         time += sec ?? 0;
     },
 
-    sound(path, volume) {
-        audio.push({sound: path, volume: volume ?? 1, start: time});
+    playSound(filePath, volume) {        
+        audio.push({
+            sound: path.join(audioFile, filePath),
+            volume: volume ?? 1,
+            start: time
+        });
+    },
+
+    setAudioFile(filePath) {
+        audioFile = filePath;
     },
 
     setBackgroundColor(color) {
@@ -212,7 +225,8 @@ export const Engine = {
         textLength = 0;
 
         // Wrap while preserving bold state across line breaks.
-        const lines = wrapBoldTextSegments(prop);
+        let lines = balancedText(prop);
+
         const lineHeight = prop.fontSize;
         const totalHeight = lines.length * lineHeight;
 

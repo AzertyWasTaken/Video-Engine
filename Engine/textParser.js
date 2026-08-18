@@ -125,6 +125,10 @@ function chunkTokens(tokens) {
     return chunks;
 }
 
+function isSpace(text) {
+    return text.trim().length === 0;
+}
+
 // Wrap chunks by measuring line widths.
 // Remove last character (space) at the end of each line.
 function splitLines(chunks, prop) {
@@ -136,10 +140,14 @@ function splitLines(chunks, prop) {
         const chunk = chunks[i];
         const w = measureChunkWidth(chunk, prop);
 
-        if (currentLine.length > 0 && (currentWidth + w) > prop.maxWidth) {
+        // End line if it reaches maximum allowed width.
+        if (
+            currentLine.length > 0
+            && (currentWidth + w) > prop.maxWidth
+            && isSpace(currentLine.at(-1).text)
+        ) {
             // Remove trailing space at the end of each line.
-            if (currentLine.at(-1).text.trim().length === 0)
-                currentLine.pop();
+            currentLine.pop();
 
             lines.push(currentLine);
             currentLine = [];
@@ -194,7 +202,7 @@ function segTextLine(line, symbol, escape) {
 
 // Wrap while preserving bold state across line breaks.
 // This must match the vertical positioning behavior of getWrappedTextPos().
-export function wrapBoldTextSegments(prop) {
+function wrapBoldTextSegments(prop) {
     let text = prop.text;
 
     // Build word/space chunks with bold state preserved.
@@ -212,4 +220,26 @@ export function wrapBoldTextSegments(prop) {
     }
 
     return tokens;
+}
+
+export function balancedText(prop) {
+    let lines = wrapBoldTextSegments(prop);
+
+    if (prop.balancedWidth && lines.length > 1) {
+        let add = prop.maxWidth;
+
+        while (add >= 40) {
+            add /= 2;
+            prop.maxWidth -= add;
+            let newLines = wrapBoldTextSegments(prop);
+
+            if (newLines.length !== lines.length) {
+                prop.maxWidth += add;
+            } else {
+                lines = newLines;
+            }
+        }
+    }
+
+    return lines;
 }

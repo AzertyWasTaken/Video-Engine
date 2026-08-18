@@ -72,7 +72,7 @@ function buildAmixFilter(mixInputLabels, videoDuration) {
     return `${amixBase}[audio]`;
 }
 
-function resolveSoundFilePath(soundName, videoDirectory) {
+function resolveSoundFilePath(soundName) {
     if (typeof soundName !== "string") {
         throw new TypeError(
             `addSounds.js: Invalid sound value — expected a string, got ${typeof soundName}. ` +
@@ -80,25 +80,7 @@ function resolveSoundFilePath(soundName, videoDirectory) {
         );
     }
 
-    // If the caller provided an absolute or relative path, resolve relative to script dir.
-    if (soundName.startsWith("./") || soundName.includes("/")) {
-        const resolved = path.isAbsolute(soundName) ? soundName : path.join(videoDirectory, soundName);
-        if (!fs.existsSync(resolved)) {
-            throw new Error(
-                `addSounds.js: Missing audio file at resolved path: ${resolved}`
-            );
-        }
-        return resolved;
-    }
-
-    // Bare filename (no directory separator): try videoDir.
-    const directSoundPath = path.join(videoDirectory, soundName);
-    if (fs.existsSync(directSoundPath)) return directSoundPath;
-
-    throw new Error(
-        `addSounds.js: Missing audio file "${soundName}". ` +
-        `Looked in: ${directSoundPath}`
-    );
+    return soundName;
 }
 
 function appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex, videoDirectory) {
