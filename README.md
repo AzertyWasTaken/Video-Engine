@@ -88,8 +88,9 @@ _.getDuration() // Total elapsed time
 ```js
 _.newText(textConfig); // Add a text event at the current time cursor
 _.setText(id, text) // Replace text of an existing id (clears old, creates new)
-_.setProp({...}) // Set default properties for subsequent newText calls — merges into persistent defaults
-_.changeProp({key: delta}) // Increment/decrement numeric default properties (e.g. {posY: 80}). Throws on non-numeric values.
+_.setProp(newProp, type = "text") // Set default properties for the given type ("text", "line", "rect", "circle", "image") — merges into persistent defaults
+_.changeProp({key: delta}, type = "text") // Increment/decrement numeric default properties for the given type. Throws on non-numeric values.
+_.getProp(key, type = "text") // Get a default property value for the given type
 ```
 
 #### Text configuration properties
@@ -157,7 +158,7 @@ When `segmentSymbol` is set (not null), each line is split by that symbol into t
 
 ```js
 onTextSegment: (textLength) => {
-  _.sound("Sounds/click.wav", 2);
+  _.playSound("Sounds/click.wav", 2);
   _.wait(Math.floor(textLength / 12 + 2) / 2);
 }
 ```
@@ -190,12 +191,69 @@ _.newText({text: "This has a ; that should not split.", segmentSymbol: null});
 
 ```js
 _.setBackgroundColor("#101020") // Set background at current time
-_.newCircle(id, posX, posY, diameter, color) // Add a circle at (posX, posY) from center with given diameter and color
-_.newLine(id, posX, posY, lengthX, lengthY, lineWidth, color) // Add a line from (posX - lengthX/2, posY - lengthY/2) to (posX + lengthX/2, posY + lengthY/2)
-_.newImage(id, src, posX, posY, width, height) // Add an image overlay at (posX, posY) from center
+_.newLine(newProp) // Add a line centered at (posX, posY) with vector (lengthX, lengthY)
+_.newCircle(newProp) // Add a circle at (posX, posY) from center with given diameter
+_.newRect(newProp) // Add a rectangle at (posX, posY) from center with given width and height
+_.newImage(newProp) // Add an image overlay at (posX, posY) from center
 _.clear(id) // End all active events with matching id
 _.centerText(idSet, posX = 0, posY = 0) // Reposition a group of ids so their bounding-box center moves to (posX, posY)
 ```
+
+#### Visual configuration properties
+
+The following default properties can be set via `_.setProp(newProp, type)` where `type` is `"text"`, `"line"`, `"rect"`, `"circle"`, or `"image"`.
+
+##### Line properties
+
+| Property | Default | Description |
+| - | - | - |
+| `id` | `0` | Integer or string group identifier (required) |
+| `lengthX` | `0` | Horizontal vector component from center |
+| `lengthY` | `0` | Vertical vector component from center |
+| `lineWidth` | `16` | Stroke width in pixels |
+| `color` | `"#FFFFFF"` | Line color (any CSS color string) |
+| `posX` | `0` | Horizontal offset from center |
+| `posY` | `0` | Vertical offset from center |
+| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
+| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
+
+##### Rectangle properties
+
+| Property | Default | Description |
+| - | - | - |
+| `id` | `0` | Integer or string group identifier (required) |
+| `width` | `256` | Rectangle width in pixels |
+| `height` | `256` | Rectangle height in pixels |
+| `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
+| `posX` | `0` | Horizontal offset from center |
+| `posY` | `0` | Vertical offset from center |
+| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
+| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
+
+##### Circle properties
+
+| Property | Default | Description |
+| - | - | - |
+| `id` | `0` | Integer or string group identifier (required) |
+| `diameter` | `40` | Circle diameter in pixels |
+| `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
+| `posX` | `0` | Horizontal offset from center |
+| `posY` | `0` | Vertical offset from center |
+| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
+| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
+
+##### Image properties
+
+| Property | Default | Description |
+| - | - | - |
+| `id` | `0` | Integer or string group identifier (required) |
+| `src` | `""` | Image source path (relative to script dir or absolute) |
+| `width` | `256` | Rendered width in pixels |
+| `height` | `256` | Rendered height in pixels |
+| `posX` | `0` | Horizontal offset from center |
+| `posY` | `0` | Vertical offset from center |
+| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
+| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
 
 #### Visual element types
 
@@ -206,6 +264,7 @@ All visual events pushed to the timeline share this structure:
 | `"background"` | `color`, `start` | Fills the canvas with `color` from `start` onward |
 | `"text"` | `text`, `posX`, `posY`, `fontSize`, `fontColor`, `fontWeight`, `fontFamily`, `fadeIn`, `fadeOut`, `flashDuration`, `flashColor`, `start`, `end?` | Renders a text segment |
 | `"circle"` | `posX`, `posY`, `diameter`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a filled circle |
+| `"rect"` | `posX`, `posY`, `width`, `height`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a filled rectangle centered at `(posX, posY)` |
 | `"line"` | `posX`, `posY`, `lengthX`, `lengthY`, `lineWidth`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a line centered at `(posX, posY)` |
 | `"image"` | `src`, `posX`, `posY`, `width`, `height`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws an image overlay |
 
@@ -220,7 +279,7 @@ _.getDuration() // Total seconds
 ### Sound
 
 ```js
-_.sound("Sounds/click.wav", volume) // Schedule a sound at the current time cursor; volume defaults to 1 if omitted
+_.playSound("Sounds/click.wav", volume) // Schedule a sound at the current time cursor; volume defaults to 1 if omitted
 ```
 
 ## Time model (important)
@@ -231,7 +290,7 @@ The `Engine` maintains a monotonically increasing `time` cursor. Everything is p
 _.wait(2) // time = 2
 _.newText({...}) // text event starts at time = 2
 _.wait(1) // time = 3
-_.sound("Sounds/click.wav") // audio event starts at time = 3
+_.playSound("Sounds/click.wav") // audio event starts at time = 3
 _.clear(id) // text event ends at time = 3
 ```
 
@@ -296,7 +355,7 @@ This produces:
 
 3. **Set CONFIG** (width, height, FPS).
 4. **Set defaults** with `_.setProp({...})` and `_.setBackgroundColor(...)`.
-5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.sound()`, etc.
+5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.playSound()`, etc.
 6. **Call** `await record(CONFIG, visual, duration, callerPath);` and `addSounds(audio, duration, callerFilePath);` to produce `visual.mp4` and `audio.mp4`.
 
 **Always pass `import.meta.url` as the last argument** to `record()` and `addSounds()` — this ensures output files are written next to your animation script, not in a random CWD.
@@ -308,7 +367,7 @@ This produces:
 | `visual.mp4` not found | Ran `node Engine/record.js` directly | Run an `anim_*.js` script instead |
 | FFmpeg not found | Path mismatch | Update `ffmpegPath` in `record.js` or set `FFMPEG_PATH` env var |
 | Missing audio in output | `addSounds()` commented out | Uncomment `addSounds()` to enable it |
-| Audio out of sync | Audio `start` depends on `time` cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.sound()` match intended timing |
+| Audio out of sync | Audio `start` depends on `time` cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.playSound()` match intended timing |
 | Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
 | Bold not rendering | `boldSymbol` is `null` by default | Set `_.setProp({boldSymbol: "*"})` or pass in `newText()` |
 | Segment not splitting | `segmentSymbol` is `null` by default | Set `_.setProp({segmentSymbol: ";"})` or pass in `newText()` |

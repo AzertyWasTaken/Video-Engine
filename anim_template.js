@@ -95,6 +95,10 @@ _.wait(2);
 
 _.clear(new Set([3, "text"]), 1);
 
+// Rectangle visual
+_.newRect({id: "shape", posX: 0, posY: 0, width: 800, height: 480, color: "#FF6060"});
+_.wait(1);
+
 // Circle visual
 _.setProp({id: "shape"});
 _.newCircle({id: "shape", posX: 0, posY: -120, diameter: 40});

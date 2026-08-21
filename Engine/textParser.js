@@ -7,7 +7,7 @@ const ctx = canvas.getContext("2d");
 // Produces an ordered list of segments with bold and color state applied across the whole input text.
 // Each returned segment has the form `{text: <string>, bold: <bool>, color: <rgb|null>}`.
 // Special characters (bold toggle, color toggle, and escape) can be escaped.
-function tokenizeBoldText(text, boldCh, colorCh, escapeCh) {
+function tokenizeText(text, boldCh, colorCh, escapeCh) {
     const tokens = [];
     let bold = false;
     const colorStack = [];
@@ -57,6 +57,7 @@ function tokenizeBoldText(text, boldCh, colorCh, escapeCh) {
             continue;
         }
 
+        // ---- Escape character ----
         // Escape symbol: keep it in the output for downstream parsing (segTextLine),
         // and copy the next character verbatim so it skips bold / color parsing here.
         if (ch === escapeCh) {
@@ -176,6 +177,7 @@ function segTextLine(line, symbol, escape) {
             if (ch === symbol) {
                 if (current.length > 0)
                     result.push({text: current, bold: seg.bold, color: seg.color});
+
                 current = "";
                 result.push("wait");
                 continue;
@@ -202,28 +204,17 @@ function segTextLine(line, symbol, escape) {
 
 // Wrap while preserving bold state across line breaks.
 // This must match the vertical positioning behavior of getWrappedTextPos().
-function wrapBoldTextSegments(prop) {
-    let text = prop.text;
-
+export function wrapTextSegments(prop) {
     // Build word/space chunks with bold state preserved.
-    let tokens = prop.boldSymbol === null
-    ? [{text, bold: false}]
-    : tokenizeBoldText(text, prop.boldSymbol, prop.colorSymbol, prop.escapeSymbol);
+    const tokens = chunkTokens(tokenizeText(
+        prop.text,
+        prop.boldSymbol,
+        prop.colorSymbol,
+        prop.escapeSymbol
+    ));
 
-    tokens = chunkTokens(tokens);
-    tokens = splitLines(tokens, prop);
-
-    if (prop.segmentSymbol !== null) {
-        tokens = tokens.map((i) =>
-            segTextLine(i, prop.segmentSymbol, prop.escapeSymbol)
-        );
-    }
-
-    return tokens;
-}
-
-export function balancedText(prop) {
-    let lines = wrapBoldTextSegments(prop);
+    // Balance text width to prevent shorter last line
+    let lines = splitLines(tokens, prop);
 
     if (prop.balancedWidth && lines.length > 1) {
         let add = prop.maxWidth;
@@ -231,14 +222,21 @@ export function balancedText(prop) {
         while (add >= 40) {
             add /= 2;
             prop.maxWidth -= add;
-            let newLines = wrapBoldTextSegments(prop);
+            const newLines = splitLines(tokens, prop);
 
-            if (newLines.length !== lines.length) {
-                prop.maxWidth += add;
-            } else {
+            if (newLines.length === lines.length) {
                 lines = newLines;
+            } else {
+                prop.maxWidth += add;
             }
         }
+    }
+
+    // Split text segments and remove used escape bars
+    if (prop.segmentSymbol !== null) {
+        lines = lines.map((i) =>
+            segTextLine(i, prop.segmentSymbol, prop.escapeSymbol)
+        );
     }
 
     return lines;

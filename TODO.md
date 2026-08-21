@@ -11,15 +11,15 @@
 - Text color wrapping symbols
 - Draw lines
 - `centerText` accepts x axis
-- autoSetPosX option
-- balanced width text wrapping
-- refractor `textConfig`
+- `autoSetPosX` option
+- Balanced width text wrapping
+- Refractor `textConfig`
+- Rectangles
 
 ## Engine
 
-- [ ] Bullet lists
-- [ ] Rectangles
 - [ ] Circles and rectangles strokes
+- [ ] Bullet lists
 - [ ] Table
 - [ ] Exponentiation wrapping `$`
 - [ ] Last delay option
@@ -28,6 +28,8 @@
 - [ ] Blend texts with additive compensation
 - [ ] `autoSetPos` align option
 - [ ] Global properties
+
+### Refractor and split README
 
 ## Ideas
 

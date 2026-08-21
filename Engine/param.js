@@ -31,10 +31,12 @@ export const Param = {
         onTextSegment: () => {}, // Callback per segment (textLength) => void
     },
 
-    circle: {
+    line: {
         id: 0, // Integer or string group identifier (required)
 
-        diameter: 40,
+        lengthX: 0,
+        lengthY: 0,
+        lineWidth: 16,
         color: "#FFFFFF",
 
         posX: 0, // Horizontal offset from center
@@ -44,12 +46,24 @@ export const Param = {
         fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
     },
 
-    line: {
+    rect: {
         id: 0, // Integer or string group identifier (required)
 
-        lengthX: 0,
-        lengthY: 0,
-        lineWidth: 16,
+        width: 256,
+        height: 256,
+        color: "#FFFFFF",
+
+        posX: 0, // Horizontal offset from center
+        posY: 0, // Vertical offset from center (before alignment)
+
+        fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
+        fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+    },
+
+    circle: {
+        id: 0, // Integer or string group identifier (required)
+
+        diameter: 40,
         color: "#FFFFFF",
 
         posX: 0, // Horizontal offset from center

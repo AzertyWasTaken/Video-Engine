@@ -101,6 +101,11 @@ export function render(visual, t) {
             ctx.font = `${obj.fontWeight} ${obj.fontSize}px ${obj.fontFamily}`;
             ctx.fillText(obj.text, width / 2 + obj.posX, height / 2 + obj.posY);
         }
+        else if (obj.type === "rect") {
+            ctx.rect((width - obj.width) / 2 + obj.posX, (height - obj.height) / 2 + obj.posY, obj.width, obj.height);
+            ctx.fillStyle = obj.color;
+            ctx.fill();
+        }
         else if (obj.type === "circle") {
             ctx.beginPath();
             ctx.arc(width / 2 + obj.posX, height / 2 + obj.posY, obj.diameter, 0, 2 * Math.PI);
@@ -112,8 +117,8 @@ export function render(visual, t) {
             const [posX, posY] = [width / 2 + obj.posX, height / 2 + obj.posY];
             ctx.moveTo(posX - obj.lengthX / 2, posY - obj.lengthY / 2);
             ctx.lineTo(posX + obj.lengthX / 2, posY + obj.lengthY / 2);
-            ctx.strokeStyle = obj.color;
             ctx.lineWidth = obj.lineWidth;
+            ctx.strokeStyle = obj.color;
             ctx.stroke();
         }
         else if (obj.type === "image") {

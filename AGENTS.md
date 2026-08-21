@@ -26,11 +26,11 @@ The `Engine` maintains a **monotonically increasing `time` cursor**. Everything 
 _.wait(2) // time = 2
 _.newText({...}) // text event starts at time = 2
 _.wait(1) // time = 3
-_.sound("Sounds/click.wav") // audio event starts at time = 3
+_.playSound("Sounds/click.wav") // audio event starts at time = 3
 _.clear(id) // text event ends at time = 3
 ```
 
-**Critical mental model:** Every `_.newText()`, `_.sound()`, `_.setBackgroundColor()`, `_.newCircle()`, `_.newLine()`, and `_.newImage()` call is positioned at the **current** `time` cursor. `_.wait()` is the only way to advance time. There is no "absolute time" parameter on events — they all inherit `time` at call-site.
+**Critical mental model:** Every `_.newText()`, `_.playSound()`, `_.setBackgroundColor()`, `_.newCircle()`, `_.newLine()`, `_.newRect()`, and `_.newImage()` call is positioned at the **current** `time` cursor. `_.wait()` is the only way to advance time. There is no "absolute time" parameter on events — they all inherit `time` at call-site.
 
 **Gotcha:** If you forget a `_.wait()` at the end of your script, the last events may have zero visible duration. Always ensure the final `_.wait()` covers the time you want the last elements to be visible.
 
@@ -74,7 +74,8 @@ These notes are essential for modifying engine internals:
 - **`resolveSoundFilePath()`** in `addSounds.js` throws an error if the sound file does not exist.
 - **`render.js` cache key** — `getSortedEvents()` caches the sorted event list keyed on the `visual` array **reference**. The cache is built once per render loop (in `record.js`) since the same `_.getVisualTimeline()` reference is reused for all frames.
 - **`newLine()`** — renders a line element (`type: "line"`) with `lengthX`/`lengthY` as the vector from the center position. Works with `centerText()` for alignment, just like circles, images, and text.
-- **Visual element types** — see the README's "Visual element types" table for the full field reference for each `type` (`"background"`, `"text"`, `"circle"`, `"line"`, `"image"`).
+- **`newRect()`** — renders a rectangle element (`type: "rect"`) with `width`/`height` centered at `(posX, posY)`. Works with `centerText()` for alignment, just like circles, lines, images, and text.
+- **Visual element types** — see the README's "Visual element types" table for the full field reference for each `type` (`"background"`, `"text"`, `"circle"`, `"line"`, `"rect"`, `"image"`).
 
 ## 5. Agent Workflow Tips
 

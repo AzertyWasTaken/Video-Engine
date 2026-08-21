@@ -4,7 +4,7 @@ import {fileURLToPath} from "url";
 import {Param} from "./param.js";
 import {
     getSegmentsWidth,
-    balancedText,
+    wrapTextSegments,
     measureTextWidth
 } from "./textParser.js";
 
@@ -145,21 +145,6 @@ export const Engine = {
         }
     },
 
-    newCircle(newProp) {
-        const prop = {...Param.circle, ...newProp};
-        visual.push({
-            type: "circle",
-            id: prop.id,
-            posX: prop.posX,
-            posY: prop.posY,
-            diameter: prop.diameter,
-            color: prop.color,
-            fadeIn: prop.fadeIn,
-            fadeOut: prop.fadeOut,
-            start: time
-        });
-    },
-
     newLine(newProp) {
         const prop = {...Param.line, ...newProp};
         visual.push({
@@ -170,6 +155,37 @@ export const Engine = {
             lengthX: prop.lengthX,
             lengthY: prop.lengthY,
             lineWidth: prop.lineWidth,
+            color: prop.color,
+            fadeIn: prop.fadeIn,
+            fadeOut: prop.fadeOut,
+            start: time
+        });
+    },
+
+    newRect(newProp) {
+        const prop = {...Param.rect, ...newProp};
+        visual.push({
+            type: "rect",
+            id: prop.id,
+            posX: prop.posX,
+            posY: prop.posY,
+            width: prop.width,
+            height: prop.height,
+            color: prop.color,
+            fadeIn: prop.fadeIn,
+            fadeOut: prop.fadeOut,
+            start: time
+        });
+    },
+
+    newCircle(newProp) {
+        const prop = {...Param.circle, ...newProp};
+        visual.push({
+            type: "circle",
+            id: prop.id,
+            posX: prop.posX,
+            posY: prop.posY,
+            diameter: prop.diameter,
             color: prop.color,
             fadeIn: prop.fadeIn,
             fadeOut: prop.fadeOut,
@@ -195,10 +211,11 @@ export const Engine = {
 
     newText(newProp) {
         const prop = {...Param.text, ...newProp};
+        textProp[prop.id] = prop;
         textLength = 0;
 
         // Wrap while preserving bold state across line breaks.
-        let lines = balancedText(prop);
+        let lines = wrapTextSegments(prop);
 
         const lineHeight = prop.fontSize;
         const totalHeight = lines.length * lineHeight;
@@ -216,7 +233,6 @@ export const Engine = {
             posY += lineHeight;
         }
 
-        textProp[prop.id] = prop;
         prop.onTextSegment(textLength);
         textLength = 0;
 
