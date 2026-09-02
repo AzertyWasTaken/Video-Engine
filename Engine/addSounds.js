@@ -2,19 +2,7 @@
 import {execFileSync} from "child_process";
 import fs from "fs";
 import path from "path";
-import {fileURLToPath} from "url";
-
-const ffmpegExecutablePath = process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe";
-
-function resolveCallerPath(callerPath) {
-    if (!callerPath) return process.cwd();
-    // callerPath may be an import.meta.url (e.g. "file:///d:/VSC/Anim/anim.js")
-    // or an already-resolved file path. Handle both.
-    if (callerPath.startsWith("file:")) {
-        return fileURLToPath(callerPath);
-    }
-    return callerPath;
-}
+import {ffmpegPath, resolveCallerPath} from "./utils.js";
 
 // If no valid audio events, just remux the video.
 function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
@@ -27,7 +15,7 @@ function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
     ];
 
     console.log("Processing (no audio events)...");
-    execFileSync(ffmpegExecutablePath, ffmpegArgs, {stdio: "inherit"});
+    execFileSync(ffmpegPath, ffmpegArgs, {stdio: "inherit"});
 
     console.log("Completed");
     process.exit(0);
@@ -75,7 +63,7 @@ function buildAmixFilter(mixInputLabels, videoDuration) {
 function resolveSoundFilePath(soundName) {
     if (typeof soundName !== "string") {
         throw new TypeError(
-            `addSounds.js: Invalid sound value — expected a string, got ${typeof soundName}. ` +
+            `addSounds.js: Invalid sound value - expected a string, got ${typeof soundName}. ` +
             `Value: ${JSON.stringify(soundName)}`
         );
     }
@@ -83,7 +71,7 @@ function resolveSoundFilePath(soundName) {
     return soundName;
 }
 
-function appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex) {
+function appendAudioInputArgs(ffmpegArgs, audioEvents) {
     // Add one -i per audio event that has a sound path (same ordering as `audioEvents` above).
     for (const audioEvent of audioEvents) {
         // Resolve relative to this script so execution cwd doesn't matter.
@@ -130,13 +118,13 @@ export function addSounds(rawAudioEvents, videoDuration, callerFilePath) {
     const filterComplex = [filterPartStrings.join(";"), amixFilter].filter(Boolean).join(";");
 
     const ffmpegArgs = ["-y", "-i", videoFilePath];
-    appendAudioInputArgs(ffmpegArgs, audioEvents, filterComplex);
+    appendAudioInputArgs(ffmpegArgs, audioEvents);
     appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath);
 
     console.log("Processing...");
 
     try {
-        execFileSync(ffmpegExecutablePath, ffmpegArgs, {stdio: "inherit"});
+        execFileSync(ffmpegPath, ffmpegArgs, {stdio: "inherit"});
         console.log("Completed");
     }
     catch (error) {

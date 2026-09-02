@@ -1,7 +1,7 @@
 "use strict";
 export const Param = {
     text: {
-        id: 0, // Integer or string group identifier (required)
+        id: null, // Integer or string group identifier (auto-assigned when omitted)
 
         text: "Hello, world!",
         fontSize: 80,
@@ -22,6 +22,7 @@ export const Param = {
 
         fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
         fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+        duration: null, // Seconds until the event auto-ends (null = until cleared)
         autoSetPosX: false, // Auto-increment posX for chained texts
         autoSetPosY: false, // Auto-increment posY for chained texts
 
@@ -32,7 +33,7 @@ export const Param = {
     },
 
     line: {
-        id: 0, // Integer or string group identifier (required)
+        id: null, // Integer or string group identifier (auto-assigned when omitted)
 
         lengthX: 0,
         lengthY: 0,
@@ -44,10 +45,11 @@ export const Param = {
 
         fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
         fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+        duration: null, // Seconds until the event auto-ends (null = until cleared)
     },
 
     rect: {
-        id: 0, // Integer or string group identifier (required)
+        id: null, // Integer or string group identifier (auto-assigned when omitted)
 
         width: 256,
         height: 256,
@@ -58,10 +60,11 @@ export const Param = {
 
         fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
         fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+        duration: null, // Seconds until the event auto-ends (null = until cleared)
     },
 
     circle: {
-        id: 0, // Integer or string group identifier (required)
+        id: null, // Integer or string group identifier (auto-assigned when omitted)
 
         diameter: 40,
         color: "#FFFFFF",
@@ -71,10 +74,11 @@ export const Param = {
 
         fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
         fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+        duration: null, // Seconds until the event auto-ends (null = until cleared)
     },
 
     image: {
-        id: 0, // Integer or string group identifier (required)
+        id: null, // Integer or string group identifier (auto-assigned when omitted)
 
         width: 256,
         height: 256,
@@ -85,5 +89,8 @@ export const Param = {
 
         fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
         fadeOut: 0, // Fade-out duration (seconds) from full opacity to transparent
+        duration: null, // Seconds until the event auto-ends (null = until cleared)
     },
+
+    addon: {}
 };

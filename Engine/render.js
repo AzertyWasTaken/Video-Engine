@@ -9,6 +9,10 @@ const imageCache = new Map();
 let cachedVisualRef = null;
 let cachedSortedEvents = null;
 
+// Reused per-frame tween buffers (cleared at the start of every frame).
+const tweenOffsets = new Map(); // targetId -> {key: offset value}
+const tweenColors = new Map();  // drawable event -> css color string
+
 export function setCanvas(WIDTH, HEIGHT) {
     canvas = createCanvas(WIDTH, HEIGHT);
     width = WIDTH;
@@ -26,9 +30,8 @@ function getSortedEvents(visual) {
     return cachedSortedEvents;
 }
 
-// Binary search for the first event with start > t (i.e. the first event
-// that has NOT yet started at time t). All events before this index have
-// `start <= t` and are candidates for being active.
+// Binary search for the first event with start > t.
+// All events before this index have `start <= t` and are candidates for being active.
 function findFirstActive(sortedEvents, t) {
     let lo = 0;
     let hi = sortedEvents.length;
@@ -53,6 +56,40 @@ function pushRelevantObjects(objects, t, visual) {
         const obj = sortedEvents[i];
         if (t < (obj.end ?? Infinity)) {
             objects.push(obj);
+        }
+    }
+}
+
+// Collect active tween contributions into the reused per-frame maps.
+// Tween events carry either a property delta (targetId + key) or a color
+// override (a direct reference to one drawable event).
+function collectTweens(objects, t) {
+    tweenOffsets.clear();
+    tweenColors.clear();
+
+    for (const obj of objects) {
+        if (obj.type !== "tween") continue;
+
+        const span = obj.tweenEnd - obj.start;
+        const p = span <= 0 ? 1 : Math.min(Math.max((t - obj.start) / span, 0), 1);
+        const e = obj.easing(p);
+
+        if (obj.color) {
+            const from = obj.color.from;
+            const to = obj.color.to;
+            const r = Math.round(from[0] + (to[0] - from[0]) * e);
+            const g = Math.round(from[1] + (to[1] - from[1]) * e);
+            const b = Math.round(from[2] + (to[2] - from[2]) * e);
+            tweenColors.set(obj.target, `rgb(${r},${g},${b})`);
+        } else {
+            const value = obj.from + (obj.to - obj.from) * e;
+
+            let entry = tweenOffsets.get(obj.targetId);
+            if (entry === undefined) {
+                entry = {};
+                tweenOffsets.set(obj.targetId, entry);
+            }
+            entry[obj.key] = value;
         }
     }
 }
@@ -85,49 +122,75 @@ export function render(visual, t) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
+    collectTweens(objects, t);
+
     for (const obj of objects) {
+        if (obj.type === "tween") continue;
+
         // Compute opacity for fadeIn / fadeOut
         const opacity = getTextOpacity(obj, t);
         if (opacity <= 0) continue;
         ctx.globalAlpha = opacity;
 
+        // Tween offsets apply to the object's whole id group
+        const tw = tweenOffsets.get(obj.id);
+        const posX = width / 2 + obj.posX + (tw?.posX ?? 0);
+        const posY = height / 2 + obj.posY + (tw?.posY ?? 0);
+        const colorOverride = tweenColors.get(obj);
+
         if (obj.type === "text") {
-            if (t - obj.start < obj.flashDuration) {
+            if (colorOverride) {
+                ctx.fillStyle = colorOverride;
+            } else if (t - obj.start < obj.flashDuration) {
                 ctx.fillStyle = obj.flashColor;
             } else {
                 ctx.fillStyle = obj.fontColor;
             }
 
-            ctx.font = `${obj.fontWeight} ${obj.fontSize}px ${obj.fontFamily}`;
-            ctx.fillText(obj.text, width / 2 + obj.posX, height / 2 + obj.posY);
+            const fontSize = obj.fontSize + (tw?.fontSize ?? 0);
+            ctx.font = `${obj.fontWeight} ${fontSize}px ${obj.fontFamily}`;
+            ctx.fillText(obj.text, posX, posY);
         }
         else if (obj.type === "rect") {
-            ctx.rect((width - obj.width) / 2 + obj.posX, (height - obj.height) / 2 + obj.posY, obj.width, obj.height);
-            ctx.fillStyle = obj.color;
+            const rectWidth = obj.width + (tw?.width ?? 0);
+            const rectHeight = obj.height + (tw?.height ?? 0);
+
+            // beginPath is required: the canvas path persists across frames.
+            ctx.beginPath();
+            ctx.rect(
+                (width - rectWidth) / 2 + obj.posX + (tw?.posX ?? 0),
+                (height - rectHeight) / 2 + obj.posY + (tw?.posY ?? 0),
+                rectWidth, rectHeight
+            );
+            ctx.fillStyle = colorOverride ?? obj.color;
             ctx.fill();
         }
         else if (obj.type === "circle") {
             ctx.beginPath();
-            ctx.arc(width / 2 + obj.posX, height / 2 + obj.posY, obj.diameter, 0, 2 * Math.PI);
-            ctx.fillStyle = obj.color;
+            ctx.arc(posX, posY, obj.diameter + (tw?.diameter ?? 0), 0, 2 * Math.PI);
+            ctx.fillStyle = colorOverride ?? obj.color;
             ctx.fill();
         }
         else if (obj.type === "line") {
             ctx.beginPath();
-            const [posX, posY] = [width / 2 + obj.posX, height / 2 + obj.posY];
-            ctx.moveTo(posX - obj.lengthX / 2, posY - obj.lengthY / 2);
-            ctx.lineTo(posX + obj.lengthX / 2, posY + obj.lengthY / 2);
-            ctx.lineWidth = obj.lineWidth;
-            ctx.strokeStyle = obj.color;
+            const lengthX = obj.lengthX + (tw?.lengthX ?? 0);
+            const lengthY = obj.lengthY + (tw?.lengthY ?? 0);
+            ctx.moveTo(posX - lengthX / 2, posY - lengthY / 2);
+            ctx.lineTo(posX + lengthX / 2, posY + lengthY / 2);
+            ctx.lineWidth = obj.lineWidth + (tw?.lineWidth ?? 0);
+            ctx.strokeStyle = colorOverride ?? obj.color;
             ctx.stroke();
         }
         else if (obj.type === "image") {
             const img = imageCache.get(obj.src);
             if (img) {
+                const imgWidth = obj.width + (tw?.width ?? 0);
+                const imgHeight = obj.height + (tw?.height ?? 0);
                 ctx.drawImage(
                     img,
-                    (width - obj.width) / 2 + obj.posX, (height - obj.height) / 2 + obj.posY,
-                    obj.width, obj.height
+                    (width - imgWidth) / 2 + obj.posX + (tw?.posX ?? 0),
+                    (height - imgHeight) / 2 + obj.posY + (tw?.posY ?? 0),
+                    imgWidth, imgHeight
                 );
             }
         }

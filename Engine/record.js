@@ -1,20 +1,8 @@
 "use strict";
 import path from "path";
-import {fileURLToPath} from "url";
 import {spawn} from "child_process";
 import {render, setCanvas, loadImageAsset} from "./render.js";
-
-const ffmpegPath = process.env.FFMPEG_PATH ?? "C:/ffmpeg/bin/ffmpeg.exe";
-
-function resolveCallerPath(callerPath) {
-    if (!callerPath) return process.cwd();
-    // callerPath may be an import.meta.url (e.g. "file:///d:/VSC/Anim/anim.js")
-    // or an already-resolved file path. Handle both.
-    if (callerPath.startsWith("file:")) {
-        return fileURLToPath(callerPath);
-    }
-    return callerPath;
-}
+import {ffmpegPath, resolveCallerPath} from "./utils.js";
 
 function getFFMPEG(CONFIG, outputFile) {
     return spawn(ffmpegPath, [
