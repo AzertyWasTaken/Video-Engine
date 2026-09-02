@@ -1,381 +1,83 @@
 # Anim
 
-This project contains a Node.js/Canvas + FFmpeg pipeline to generate animated math videos with rich text, audio, and custom effects.
+Node.js/Canvas + FFmpeg pipeline to generate animated math videos with rich text, audio, and custom effects.
 
 > **Agent tip:** For implementation notes, performance considerations, and editing guidance, see [AGENTS.md](./AGENTS.md).
 
-## What each module does
-
-### Animation scripts (`anim_*.js`)
-
-Starter template — copy to create new animations.
-
-Each `anim_*.js` file is a self-contained entry point that:
-
-1. Creates a timeline using the `Engine` API (from `Engine/engine.js`).
-2. Calls `record` and `addSounds` to encode `visual.mp4` and `audio.mp4`.
-
-**Engine modules are NOT entry points.** Never run `node Engine/record.js` directly — always run an `anim_*.js` script that imports from `Engine/`.
-
-### `package.json`
-
-```json
-{
-    "type": "module",
-    "dependencies": {
-        "@napi-rs/canvas": "^0.1.97"
-    }
-}
-```
-
-### `Engine/engine.js`
-
-Core timeline builder (global state, time cursor).
-
-Exports the `Engine` object (aliased `_` in animation scripts), which maintains a global `time` cursor and accumulates `visual` and `audio` arrays.
-
-### `Engine/textParser.js`
-
-Handles text tokenization (bold, color, escape markup), width measurement, line wrapping, and segment splitting (configurable symbol for timed text chunks). Uses a module-level 1x1 canvas singleton for `measureText()` calls.
-
-### `Engine/render.js`
-
-Per-frame Canvas renderer (cached sort + binary search).
-
-Takes the visual timeline and a time `t`, draws all active objects to a Canvas, and returns the Canvas. `record.js` then extracts `ImageData` via `canvas.getContext('2d').getImageData(...)` for FFmpeg streaming. Uses cached sorted events with binary search for efficient per-frame filtering.
-
-**Cache caveat:** The sorted-events cache is invalidated when the `visual` array **reference** changes, not when its contents change. If you mutate the array in-place, use `_.getVisualTimeline()` to get the latest reference before rendering.
-
-### `Engine/record.js`
-
-Spawns FFmpeg, writes consecutive RGBA frames (at `CONFIG.FPS`) to stdin, and produces `visual.mp4`. Also preloads image assets referenced in the visual timeline (via `loadImageAsset()`), resolving paths relative to the calling script's directory.
-
-```js
-await record(CONFIG, visual, duration, callerPath)
-```
-
-- `CONFIG` — `{WIDTH, HEIGHT, FPS}` object
-- `visual` — visual events array (from `_.getVisualTimeline()`)
-- `duration` — total seconds (from `_.getDuration()`)
-- `callerPath` — `import.meta.url` of the calling script; defaults to the calling file's directory
-- Returns the path to the output file (`visual.mp4`)
-
-### `Engine/addSounds.js`
-
-Takes the audio timeline, delays each sound file via FFmpeg `adelay`, mixes them with `amix`, and produces `audio.mp4`. If no audio events have a `sound` property, it remuxes `visual.mp4` with a silent AAC track instead.
-
-```js
-addSounds(audio, duration, callerFilePath)
-```
-
-- `audio` — audio events array (from `_.getAudioTimeline()`)
-- `duration` — total seconds (from `_.getDuration()`)
-- `callerFilePath` — (optional) `import.meta.url` of the calling script; defaults to the calling file's directory
-
-## Engine API
-
-The `Engine` object is the core timeline builder. All methods modify a global state.
-
-### Time management
-
-```js
-_.wait(sec) // Advance the time cursor by `sec` seconds
-_.getDuration() // Total elapsed time
-```
-
-### Text
-
-```js
-_.newText(textConfig); // Add a text event at the current time cursor
-_.setText(id, text) // Replace text of an existing id (clears old, creates new)
-_.setProp(newProp, type = "text") // Set default properties for the given type ("text", "line", "rect", "circle", "image") — merges into persistent defaults
-_.changeProp({key: delta}, type = "text") // Increment/decrement numeric default properties for the given type. Throws on non-numeric values.
-_.getProp(key, type = "text") // Get a default property value for the given type
-```
-
-#### Text configuration properties
-
-| Property | Default | Description |
-| - | - | - |
-| `id` | `0` | Integer or string group identifier (required) |
-| `text` | `"Hello, world!"` | Text content to render |
-| `fontSize` | `80` | Font size in pixels |
-| `fontColor` | `"#FFFFFF"` | Text color (any CSS color string) |
-| `fontFamily` | `"Arial"` | Font family name |
-| `fontWeight` | `400` | Font weight (normal text); bold segments use `700` |
-| `posX` | `0` | Horizontal offset from center |
-| `posY` | `0` | Vertical offset from center (before alignment) |
-| `alignY` | `0` | Vertical alignment: `-1` (top), `0` (center), `1` (bottom) |
-| `maxWidth` | `Infinity` | Line-wrap threshold in pixels |
-| `balancedWidth` | `false` | Decrease the maximum width to make the last line longer. Requires `maxWidth` to be finite. |
-| `boldSymbol` | `null` | Enable bold markup parsing with the selected symbol (e.g. `"*"`) |
-| `colorSymbol` | `[]` | Enable color markup parsing with selected symbols (`[{color, symbol}]`) |
-| `segmentSymbol` | `null` | Enable segment splitting with the selected symbol (e.g. `";"`) |
-| `escapeSymbol` | `null` | Enable escaping special characters with the selected symbol (e.g. `"\\"`) |
-| `flashDuration` | `0` | Flash duration on newly spawned text (disabled if 0) |
-| `flashColor` | `"#FFFF60"` | Flash color on newly spawned text |
-| `autoSetPosX` | `false` | Auto-increment `posX` for chained `newText` calls |
-| `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
-| `onTextSegment` | `() => {}` | Callback `(textLength) => void`. Fires when a `"wait"` marker is encountered during `pushTextLine()`, and once more at the end of `newText()` with the remaining accumulated `textLength`. |
-| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
-| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
-
-Properties passed directly to `_.newText({...})` are merged on top of the persistent defaults set by `_.setProp()`.
-
-#### `_.setText(id, text)`
-
-Replaces text for an existing id: calls `_.clear(id, true)` to end the old event (skipping fade-out), then creates a new text event with the same prior configuration (except `flashDuration` is forced to `0`, `autoSetPosX` and `autoSetPosY` are forced to `false`, and `fadeIn` is forced to `0`). All other properties — including `fadeOut` — are preserved from the original `textProp[id]` config.
-
-```js
-function textDelay(length) {
-    return Math.floor(length / 12 + 2) / 2;
-}
-```
-
-### Text markup
-
-Text markup is configured via symbol-based properties. Each markup type is enabled by setting its corresponding symbol property to a non-null (or non-empty) value. Symbols can be configured globally via `_.setProp()` or overridden per-call in `_.newText()`.
-
-#### Bold markup (`boldSymbol`)
-
-When `boldSymbol` is set (not null), the text is parsed for bold markers using that symbol. For example, with `boldSymbol: "*"`:
-
-- `*bold text*` renders with `fontWeight: 700`
-- Non-starred segments use the configured `fontWeight`
-- The bold symbol characters are consumed and not rendered
-
-#### Color markup (`colorSymbol`)
-
-When `colorSymbol` is set to an array of `{color, symbol}` pairs, the text is parsed for color markers using those symbols. For example, with `colorSymbol: [{color: "#FFFF60", symbol: "_"}]`:
-
-- `_text_` between matching symbols renders with the specified `color`
-- Colors stack and can be nested
-- The symbol characters are consumed and not rendered
-
-#### Segment splitting (`segmentSymbol`)
-
-When `segmentSymbol` is set (not null), each line is split by that symbol into timed chunks. The `onTextSegment` callback fires after each chunk, typically used to play a click sound and wait:
-
-```js
-onTextSegment: (textLength) => {
-  _.playSound("Sounds/click.wav", 2);
-  _.wait(Math.floor(textLength / 12 + 2) / 2);
-}
-```
-
-#### Escaping special characters (`escapeSymbol`)
-
-When `escapeSymbol` is set (not null), special characters (bold, color, and segment symbols) can be escaped by prefixing them with the escape symbol. For example, with `escapeSymbol: "\\"`:
-
-- `\*` renders a literal `*` instead of starting bold
-- `\_` renders a literal `_` instead of starting a color span
-- `\;` renders a literal `;` instead of splitting a segment
-- `\\` renders a literal `\`
-
-> **Note:** The escape character itself is consumed during parsing — it does not appear in the rendered output. The next character after the escape is rendered verbatim (skipping bold/color/segment parsing).
-
-```js
-_.newText({text: "Use \\\\ to *escape*; special characters (like \\* or \\;)."});
-```
-
-#### Disabling markup per-call
-
-Any markup symbol can be overridden per-call. To disable a globally-enabled markup for a specific text event, set the symbol to null in the `_.newText()` call:
-
-```js
-// Disable segment splitting for this text only
-_.newText({text: "This has a ; that should not split.", segmentSymbol: null});
-```
-
-### Visuals
-
-```js
-_.setBackgroundColor("#101020") // Set background at current time
-_.newLine(newProp) // Add a line centered at (posX, posY) with vector (lengthX, lengthY)
-_.newCircle(newProp) // Add a circle at (posX, posY) from center with given diameter
-_.newRect(newProp) // Add a rectangle at (posX, posY) from center with given width and height
-_.newImage(newProp) // Add an image overlay at (posX, posY) from center
-_.clear(id) // End all active events with matching id
-_.centerText(idSet, posX = 0, posY = 0) // Reposition a group of ids so their bounding-box center moves to (posX, posY)
-```
-
-#### Visual configuration properties
-
-The following default properties can be set via `_.setProp(newProp, type)` where `type` is `"text"`, `"line"`, `"rect"`, `"circle"`, or `"image"`.
-
-##### Line properties
-
-| Property | Default | Description |
-| - | - | - |
-| `id` | `0` | Integer or string group identifier (required) |
-| `lengthX` | `0` | Horizontal vector component from center |
-| `lengthY` | `0` | Vertical vector component from center |
-| `lineWidth` | `16` | Stroke width in pixels |
-| `color` | `"#FFFFFF"` | Line color (any CSS color string) |
-| `posX` | `0` | Horizontal offset from center |
-| `posY` | `0` | Vertical offset from center |
-| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
-| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
-
-##### Rectangle properties
-
-| Property | Default | Description |
-| - | - | - |
-| `id` | `0` | Integer or string group identifier (required) |
-| `width` | `256` | Rectangle width in pixels |
-| `height` | `256` | Rectangle height in pixels |
-| `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
-| `posX` | `0` | Horizontal offset from center |
-| `posY` | `0` | Vertical offset from center |
-| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
-| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
-
-##### Circle properties
-
-| Property | Default | Description |
-| - | - | - |
-| `id` | `0` | Integer or string group identifier (required) |
-| `diameter` | `40` | Circle diameter in pixels |
-| `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
-| `posX` | `0` | Horizontal offset from center |
-| `posY` | `0` | Vertical offset from center |
-| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
-| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
-
-##### Image properties
-
-| Property | Default | Description |
-| - | - | - |
-| `id` | `0` | Integer or string group identifier (required) |
-| `src` | `""` | Image source path (relative to script dir or absolute) |
-| `width` | `256` | Rendered width in pixels |
-| `height` | `256` | Rendered height in pixels |
-| `posX` | `0` | Horizontal offset from center |
-| `posY` | `0` | Vertical offset from center |
-| `fadeIn` | `0` | Fade-in duration (seconds) from transparent to full opacity |
-| `fadeOut` | `0` | Fade-out duration (seconds) from full opacity to transparent |
-
-#### Visual element types
-
-All visual events pushed to the timeline share this structure:
-
-| `type` | Fields | Description |
-| - | - | - |
-| `"background"` | `color`, `start` | Fills the canvas with `color` from `start` onward |
-| `"text"` | `text`, `posX`, `posY`, `fontSize`, `fontColor`, `fontWeight`, `fontFamily`, `fadeIn`, `fadeOut`, `flashDuration`, `flashColor`, `start`, `end?` | Renders a text segment |
-| `"circle"` | `posX`, `posY`, `diameter`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a filled circle |
-| `"rect"` | `posX`, `posY`, `width`, `height`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a filled rectangle centered at `(posX, posY)` |
-| `"line"` | `posX`, `posY`, `lengthX`, `lengthY`, `lineWidth`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws a line centered at `(posX, posY)` |
-| `"image"` | `src`, `posX`, `posY`, `width`, `height`, `fadeIn`, `fadeOut`, `start`, `end?` | Draws an image overlay |
-
-### Timeline access
-
-```js
-_.getVisualTimeline() // Visual events array
-_.getAudioTimeline() // Audio events array
-_.getDuration() // Total seconds
-```
-
-### Sound
-
-```js
-_.playSound("Sounds/click.wav", volume) // Schedule a sound at the current time cursor; volume defaults to 1 if omitted
-```
-
-## Time model (important)
-
-The `Engine` maintains a monotonically increasing `time` cursor. Everything is positioned relative to this cursor.
-
-```js
-_.wait(2) // time = 2
-_.newText({...}) // text event starts at time = 2
-_.wait(1) // time = 3
-_.playSound("Sounds/click.wav") // audio event starts at time = 3
-_.clear(id) // text event ends at time = 3
-```
-
-**Rendering rule** (in `render.js`): an event is drawn when `t >= event.start && t < (event.end ?? Infinity)`. The `fadeIn` and `fadeOut` properties further modulate opacity within this window (see `getTextOpacity()`).
-
-**Recording rule** (in `record.js`): samples `Math.ceil(FPS * duration)` frames at `t = f / FPS`.
-
-## Text rendering pipeline
-
-1. Input text string
-2. `tokenizeBoldText()` — parse bold, color, and escape markers into token array `[{text, bold, color}, ...]`
-3. `chunkTokens()` — split tokens into word/space chunks
-4. `splitLines()` — measure widths, wrap at maxWidth
-5. `segTextLine()` — split chunks at `segmentSymbol` (if not null) → `["wait", {text, bold, color}, ...]`
-6. `pushTextLine()` — measure each segment, compute x-positions, push visual events. Calls `prop.onTextSegment(textLength)` when encountering `"wait"` markers.
-7. `newText()` (in engine.js) — calls `prop.onTextSegment(textLength)` once at the end with the remaining accumulated text length
-8. `render.js` — draw each text event at (width/2 + posX, height/2 + posY)
-
-### Size hierarchy
-
-- **Character** — atomic unit
-- **Word** — contiguous non-space characters
-- **Line** — wrapped words; removed trailing space
-- **Paragraph** — all lines from one `newText` call
-- **Section** — group of paragraphs sharing an id (ended by `clear`)
-
-## Requirements
-
-- **Node.js 18+** (ES modules: `"type": "module"`)
-- **npm dependency**: `@napi-rs/canvas` (install via `npm install`)
-- **FFmpeg** installed at:
-  - `C:/ffmpeg/bin/ffmpeg.exe`
-
-  If your FFmpeg path differs:
-  - In `Engine/record.js`: update the `ffmpegPath` constant (or set the `FFMPEG_PATH` environment variable, which takes precedence)
-  - In `Engine/addSounds.js`: set the `FFMPEG_PATH` environment variable, or update the default fallback
-
-## Setup & run
-
-From the project root:
+## Quick start
 
 ```bash
 npm install
 node anim_template.js
 ```
 
-This produces:
+This produces `visual.mp4` (video-only) and `audio.mp4` (video + mixed audio) next to the script.
 
-- `visual.mp4` — video-only output (no audio)
-- `audio.mp4` — final video with mixed & delayed audio
+**Requirements:** Node.js 18+ (ES modules), `@napi-rs/canvas` (installed via `npm install`), and FFmpeg (default `C:/ffmpeg/bin/ffmpeg.exe`; override with the `FFMPEG_PATH` environment variable - see [docs/recording.md](./docs/recording.md#ffmpeg-configuration)).
 
-### Creating a new animation
+## How it works
 
-1. **Copy** `anim_template.js`.
-2. **Import** the Engine and helpers:
+An animation script (`anim_*.js`) builds a **timeline** with the `Engine` API, then calls `record()` and `addSounds()` to encode the output:
 
-   ```js
-   import {Engine as _} from "./Engine/engine.js";
-   import {record} from "./Engine/record.js";
-   import {addSounds} from "./Engine/addSounds.js";
-   ```
+```js
+import {Engine as _} from "./Engine/engine.js";
+import {record} from "./Engine/record.js";
+import {addSounds} from "./Engine/addSounds.js";
 
-3. **Set CONFIG** (width, height, FPS).
-4. **Set defaults** with `_.setProp({...})` and `_.setBackgroundColor(...)`.
-5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.playSound()`, etc.
-6. **Call** `await record(CONFIG, visual, duration, callerPath);` and `addSounds(audio, duration, callerFilePath);` to produce `visual.mp4` and `audio.mp4`.
+const CONFIG = {WIDTH: 1920, HEIGHT: 1080, FPS: 30};
 
-**Always pass `import.meta.url` as the last argument** to `record()` and `addSounds()` — this ensures output files are written next to your animation script, not in a random CWD.
+_.setBackgroundColor("#000080");
+const title = _.newText({text: "Hello, world!", duration: 2});
+_.wait(2);
 
-## Troubleshooting
+_.moveTo(title, {posY: -200}, 1, {easing: "quadOut"});  // tween the text upward
+_.wait(1);
 
-| Symptom | Cause | Fix |
-| - | - | - |
-| `visual.mp4` not found | Ran `node Engine/record.js` directly | Run an `anim_*.js` script instead |
-| FFmpeg not found | Path mismatch | Update `ffmpegPath` in `record.js` or set `FFMPEG_PATH` env var |
-| Missing audio in output | `addSounds()` commented out | Uncomment `addSounds()` to enable it |
-| Audio out of sync | Audio `start` depends on `time` cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.playSound()` match intended timing |
-| Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
-| Bold not rendering | `boldSymbol` is `null` by default | Set `_.setProp({boldSymbol: "*"})` or pass in `newText()` |
-| Segment not splitting | `segmentSymbol` is `null` by default | Set `_.setProp({segmentSymbol: ";"})` or pass in `newText()` |
-| "Missing audio file" | Sound path not found via shorthands, script-relative, or CWD-relative resolution | Use `"Sounds/click.wav"` (relative to script), `"#sounds/click.wav"` (`imports` shorthand, see `package.json`), or an absolute path |
-| Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible |
-| `setText` loses config | `textProp[id]` not set (e.g., `newText` never called for that id) | Ensure `_.newText()` was called with the same `id` before `_.setText()` |
-| `callerPath` errors | Passed `import.meta.filename` instead of `import.meta.url` | Use `import.meta.url` (a `file://` URL) |
-| `changeProp` throws "Nonnumber values" | Passed a non-numeric delta or the property doesn't exist in `textConfig` | Ensure the property is numeric; use `setProp()` for non-numeric property changes |
-| Image not showing | `loadImageAsset` failed silently | Check console warnings; ensure image path is relative to script dir and file exists |
-| Text misaligned vertically | `alignY` not set correctly | Use `alignY: -1` (top), `0` (center), or `1` (bottom) |
-| Text not centered horizontally | `posX` offsets not accounted for | Use `centerText()` to reposition a group after positioning |
+const visual = _.getVisualTimeline();
+const audio = _.getAudioTimeline();
+const duration = _.getDuration();
+
+await record(CONFIG, visual, duration, import.meta.url);
+addSounds(audio, duration, import.meta.url);
+```
+
+Everything is positioned at a monotonically increasing **time cursor**; `_.wait()` advances it and `_.seek()` sets it directly:
+
+```js
+_.wait(2)  // time = 2
+_.newText({...})                 // text event starts at time = 2
+_.wait(1)                        // time = 3
+_.playSound("Sounds/click.wav")  // audio event starts at time = 3
+_.clear(id)                      // text event ends at time = 3
+```
+
+Creators return the group id (auto-assigned when `id` is omitted), and a `duration` property ends events on their own - so `wait` + `clear` pairs are optional.
+
+**Engine modules are NOT entry points.** Never run `node Engine/record.js` directly - always run an `anim_*.js` script that imports from `Engine/`.
+
+## Project structure
+
+| Path | Role |
+| - | - |
+| `anim_*.js` | Self-contained animation scripts (entry points). `anim_template.js` is the starter template. |
+| `Engine/engine.js` | Core timeline builder: time cursor, event arrays, all `_.` methods |
+| `Engine/param.js` | Default property objects per type (`text`, `line`, `rect`, `circle`, `image`) |
+| `Engine/textParser.js` | Text tokenization (markup), width measurement, line wrapping, segment splitting |
+| `Engine/easing.js` | Easing functions for tweens (`linear`, `quad*`, `cubic*`) |
+| `Engine/render.js` | Per-frame Canvas renderer (cached sort + binary search, tween resolution) |
+| `Engine/record.js` | Streams frames to FFmpeg, producing `visual.mp4` (also preloads image assets) |
+| `Engine/addSounds.js` | Delays and mixes audio events over the video, producing `audio.mp4` |
+| `Engine/utils.js` | Shared FFmpeg path and caller path resolution |
+
+## Documentation
+
+| Document | Contents |
+| - | - |
+| [docs/engine-api.md](./docs/engine-api.md) | Full `Engine` API reference, time model, property defaults, checkpoints, animation |
+| [docs/text.md](./docs/text.md) | Text properties, markup (bold/color/segments/escaping), rendering pipeline |
+| [docs/visuals.md](./docs/visuals.md) | Line/rect/circle/image properties, element types, rendering geometry |
+| [docs/recording.md](./docs/recording.md) | `record()` / `addSounds()`, FFmpeg setup, creating a new animation |
+| [docs/internals.md](./docs/internals.md) | Module-by-module implementation notes and performance considerations |
+| [docs/troubleshooting.md](./docs/troubleshooting.md) | Common symptoms, causes, and fixes |
+| [AGENTS.md](./AGENTS.md) | Guidance for AI agents and maintainers |
+| [TODO.md](./TODO.md) | Planned features and update log |

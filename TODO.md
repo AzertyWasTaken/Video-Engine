@@ -1,35 +1,53 @@
-﻿# TODO
+# TODO
+
+- [Github Repository](https://github.com/AzertyWasTaken/Video-Engine)
 
 ## Update log
 
-- Videos runnable from `anim.js`
-- Add `newImage()` support for image overlays
-- Add `fadeIn`/`fadeOut` effects
-- Add `textDelay` property for delayed text appearance
-- Optimize `render.js` with cached sorted events + binary search
-- Text escape bar symbol
-- Text color wrapping symbols
-- Draw lines
-- `centerText` accepts x axis
-- `autoSetPosX` option
-- Balanced width text wrapping
-- Refractor `textConfig`
-- Rectangles
+- Refractor and split `README.md`
+- Auto-assigned unique ids; visual creators return the group id
+- `duration` property auto-ends events (no manual `wait` + `clear` pairs)
+- `withProp()` scoped defaults and per-type param checkpoints
+- `seek()` for absolute time cursor jumps
+- Tween system: `animate()`, `moveTo()`, `recolor()` with `Engine/easing.js`
+- Table-driven visual event creation (`VISUAL_FIELDS` + `pushVisual`)
+- Shared `Engine/utils.js` for FFmpeg path and caller path resolution
+- Input validation with descriptive engine errors
+- `getEvents()` timeline query helper
+- Fixed missing `rect` case in `getItemSize()` (centering rect groups threw)
+- Fixed rect path accumulation in `render.js` (ghost shapes across frames)
+- Extended params with addons
+- Moving effect (`animate()` / `moveTo()`)
+- Size changing effect (tween `fontSize`, `diameter`, `width`, `height`, `lengthX`, `lengthY`, `lineWidth`)
+- Color changing effect (`recolor()`)
+- Set-prop tween (`moveTo()` takes absolute targets for any tweenable property)
+- Change `moveTo` to set prop tween
 
-## Engine
+## Features
 
 - [ ] Circles and rectangles strokes
+- [ ] Custom sound for last text segment
 - [ ] Bullet lists
 - [ ] Table
-- [ ] Exponentiation wrapping `$`
-- [ ] Last delay option
-- [ ] Moving effect
-- [ ] Revamp fading and flash effect
+- [ ] Italic wrapping `|`
+- [ ] Exponentiation wrapping `^`
 - [ ] Blend texts with additive compensation
+- [ ] Revamp fading and flash effect
 - [ ] `autoSetPos` align option
-- [ ] Global properties
+- [ ] Last delay option
+- [ ] Reverse text segments order
 
-### Refractor and split README
+## Coding
+
+- [ ] Refractor `enigne.js`
+- [ ] Global properties (params inheritance)
+- [ ] Make property locally editable
+- [ ] Set default type to global
+- [ ] Fix text resizing bug
+
+## Template
+
+- [ ] Split into multiple functions to make video rendering faster
 
 ## Ideas
 
@@ -38,8 +56,6 @@
 - Code blocks with font `monospace`
 - Support special characters
 - Break text line
-- Size changing effect
-- Color changing effect
 - Fading set text option
-- `render.js` accept only tweening with smooth transitions.
+- `render.js` accept only tweening with smooth transitions
 - Module for appending instance objects
