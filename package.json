@@ -1,6 +1,6 @@
 {
+  "type": "module",
   "dependencies": {
-    "@napi-rs/canvas": "^0.1.97"
-  },
-  "type": "module"
+    "skia-canvas": "^3.0.8"
+  }
 }
