@@ -16,7 +16,7 @@ The `Engine` uses **global mutable state**: a monotonically increasing `time` cu
 
 ## Workflow tips
 
-1. **Before editing `engine.js`:** it holds global mutable state (`time`, `visual`, `audio`, `textProp`, per-type `propCheckpoints`, tween chains). Changes to defaults persist across calls.
+1. **Before editing the engine:** the global mutable state (`time`, `visual`, `audio`, `textProp`, tween chains) lives in `Engine/state.js`; `engine.js` is the public facade (param checkpoints, audio base path). Changes to defaults persist across calls.
 2. **Before editing `textParser.js`:** the 1x1 canvas singleton is created at module load. Do not add `createCanvas` calls inside functions - reuse the module-level `ctx`.
 3. **Before editing `render.js`:** it runs `FPS x duration` times. Avoid per-frame allocations; preserve the cached sort + binary search and the reused tween maps. Keep the `beginPath()` call in the rect branch - the canvas path persists across frames.
 4. **Before editing `record.js` or `addSounds.js`:** FFmpeg arguments are order-sensitive. Test with short durations first. Both import the shared `resolveCallerPath()` and `ffmpegPath` from `Engine/utils.js`.
@@ -36,3 +36,4 @@ The `Engine` uses **global mutable state**: a monotonically increasing `time` cu
 7. **Test the full pipeline.** After engine changes, run `node anim_template.js` and verify both outputs are produced without errors.
 8. **Do not use JSDoc comments.** Keep comments short; avoid redundancy unless requested.
 9. **Do not implement backward compatibility** unless requested.
+10. **Do not add redundant features.** For example, every function in `Engine` must do different things.

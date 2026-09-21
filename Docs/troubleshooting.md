@@ -9,7 +9,7 @@
 | Missing audio in output | `addSounds()` commented out | Uncomment `addSounds()` to enable it |
 | Audio out of sync | Audio `start` depends on the time cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.playSound()` match the intended timing |
 | Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
-| Bold not rendering | `boldSymbol` is `null` by default | Set `_.setProp({boldSymbol: "*"})` or pass it in `newText()` |
+| Style not rendering | `styleSymbol` is `[]` by default | Pass `styleSymbol` entries in `newText()` |
 | Segment not splitting | `segmentSymbol` is `null` by default | Set `_.setProp({segmentSymbol: ";"})` or pass it in `newText()` |
 | "Missing audio file" | Sound path does not exist: `_.playSound()` joins the path against the base set by `_.setAudioFile()` (by default the `engine.js` module path), and `addSounds()` checks it from the CWD | Call `_.setAudioFile(path.dirname(fileURLToPath(import.meta.url)))` and use paths relative to the script (e.g. `"Sounds/click.wav"`), or pass an absolute path |
 | Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible, or give the event a `duration` |

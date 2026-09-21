@@ -2,13 +2,12 @@
 import path from "path";
 import {fileURLToPath} from "url";
 import {Engine as _} from "./Engine/engine.js";
-import {record} from "./Engine/record.js";
-import {addSounds} from "./Engine/addSounds.js";
+import {renderVideo} from "./Engine/pipeline.js";
 
 const CONFIG = {
     WIDTH: 1920,
     HEIGHT: 1080,
-    FPS: 30
+    FPS: 12
 };
 
 function textDelay(length) {
@@ -29,18 +28,18 @@ _.setBackgroundColor("#000080");
 _.setProp({
     fontSize: 80,
     maxWidth: 960,
-    boldSymbol: "*",
     segmentSymbol: ";",
     escapeSymbol: "\\",
-    colorSymbol: [
-        {color: "#FF6060", symbol: "_"},
+    styleSymbol: [
+        {symbol: "*", fontWeight: 700},
+        {symbol: "_", color: "#FF6060"},
     ],
 });
 
 function testText() {
     // `duration` ends the event automatically (no clear needed)
     _.newText({text: "Text example with yellow flash effect.", flashDuration: 0.5, duration: 1});
-    _.wait(1);
+    _.waitUntilIdle();
 
     // Creators return the group id (auto-assigned when omitted)
     const boldText = _.newText({text: "Text with *a bold* segment."});
@@ -93,6 +92,11 @@ function testText() {
 
         _.clear("width");
     });
+
+    // Hard line breaks with \n (style state carries across breaks)
+    const breaks = _.newText({text: "Hard break *demo*:\nfirst line,\n*second styled* line."});
+    _.wait(1);
+    _.clear(breaks);
 }
 
 function testVisual() {
@@ -112,18 +116,25 @@ function testVisual() {
 
     _.newLine({id: "shape", posX: 0, posY: 120, lengthY: 120, duration: 1});
     _.wait(1);
+
+    // Strokes: strokeColor enables the stroke
+    _.newRect({id: "strokes", posX: -140, posY: 0, width: 240, height: 160, color: "#202040", strokeColor: "#FFE040", strokeWidth: 8, duration: 1});
+    _.newCircle({id: "strokes", posX: 140, posY: 0, diameter: 90, color: "#402060", strokeColor: "#FF6060", strokeWidth: 6, duration: 1});
+    _.wait(1);
 }
 
 function testAnim() {
+    // Temporary background: fades in over navy and fades back out after 2s
+    _.setBackgroundColor("#400080", {fadeIn: 0.5, fadeOut: 0.5, duration: 2});
+
     _.withProp({maxWidth: Infinity}, () => {
         _.newText({text: "Fading in and out…", fadeIn: 1, fadeOut: 1, duration: 3});
-        _.wait(3);
+        _.waitUntilIdle();
 
         // Fade in / fade out text with a crossfade via setText
         const fading = _.newText({text: "Another fading in and out…", fadeIn: 1, fadeOut: 1});
         _.wait(3);
-        _.setText(fading, "Smooth crossfading text.", 1);
-        _.wait(2);
+        _.setText(fading, "Smooth crossfading text.", {fade: 1, hold: 2});
         _.clear(fading);
     });
 
@@ -131,7 +142,7 @@ function testAnim() {
     const title = _.newText({text: "Animating text", posY: -200});
     _.wait(0.5);
 
-    _.moveTo(title, {posX: 0, posY: 0}, 1, {easing: "quadOut"});
+    _.moveTo(title, {posX: 0, posY: 0}, 1, {easing: "backOut"});
     _.wait(1);
 
     _.animate(title, {posX: -300}, 1, {easing: "cubicInOut"});
@@ -147,6 +158,29 @@ function testAnim() {
     _.wait(1);
 
     _.clear(title, 1);
+
+    // Multi-type scoped defaults: text and circle change and restore together
+    _.withProp({text: {fontSize: 60}, circle: {color: "#FFE040", diameter: 60}}, () => {
+        _.newText({text: "Multi-type scoped defaults.", posY: -160});
+        _.newCircle({posY: 160, duration: 1});
+        _.wait(1);
+    });
+}
+
+// Scenes: named chapters with recorded boundaries (optional leading pad)
+function testScenes() {
+    const intro = _.scene("intro", () => {
+        _.newText({text: "Chapter one.", duration: 1});
+        _.waitUntilIdle();
+    }, {pad: 1});
+
+    // chapter() marks boundaries in inline code
+    _.chapter("outro");
+    _.newText({text: "Chapter two.", duration: 1});
+    _.waitUntilIdle();
+
+    console.log(_.getChapters());
+    return intro;
 }
 
 // seek() jumps the time cursor directly
@@ -154,13 +188,9 @@ function testAnim() {
 
 // testText();
 // testVisual();
-testAnim();
+// testAnim();
+testScenes();
 
 // Render video and audio
-const visual = _.getVisualTimeline();
-const audio = _.getAudioTimeline();
-const duration = _.getDuration();
-
+const {duration} = await renderVideo(CONFIG, import.meta.url, {audio: true});
 console.log(`Duration: ${duration}s`);
-await record(CONFIG, visual, duration, import.meta.url);
-addSounds(audio, duration, import.meta.url);

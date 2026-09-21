@@ -14,16 +14,15 @@ Properties passed directly to `_.newText({...})` are merged on top of the persis
 
 | Property | Default | Description |
 | - | - | - |
-| `text` | `"Hello, world!"` | Text content to render |
+| `text` | `"Hello, world!"` | Text content to render (`\n` forces a line break) |
 | `fontSize` | `80` | Font size in pixels (also the line height) |
 | `fontColor` | `"#FFFFFF"` | Text color (any CSS color string) |
 | `fontFamily` | `"Arial"` | Font family name |
-| `fontWeight` | `400` | Font weight (normal text); bold segments use `700` |
+| `fontWeight` | `400` | Font weight (normal text); styled segments override it |
 | `alignY` | `0` | Vertical alignment: `-1` (top), `0` (center), `1` (bottom) |
 | `maxWidth` | `Infinity` | Line-wrap threshold in pixels |
 | `balancedWidth` | `false` | Decrease the maximum width to make the last line longer. Requires `maxWidth` to be finite. |
-| `boldSymbol` | `null` | Enable bold markup with the selected symbol (e.g. `"*"`) |
-| `colorSymbol` | `[]` | Enable color markup with selected symbols (`[{color, symbol}]`) |
+| `styleSymbol` | `[]` | Enable style markup with selected symbols |
 | `segmentSymbol` | `null` | Enable segment splitting with the selected symbol (e.g. `";"`) |
 | `escapeSymbol` | `null` | Enable escaping special characters with the selected symbol (e.g. `"\\"`) |
 | `flashDuration` | `0` | Flash duration on newly spawned text (disabled if 0) |
@@ -44,19 +43,14 @@ function textDelay(length) {
 
 Each markup type is enabled by setting its symbol property - globally via `_.setProp()` or per-call in `_.newText()`. Symbol characters are consumed and never rendered.
 
-### Bold markup (`boldSymbol`)
+### Style markup (`styleSymbol`)
 
-With `boldSymbol: "*"`:
+With style entries enabled:
 
 - `*bold text*` renders with `fontWeight: 700`
-- Non-starred segments keep the configured `fontWeight`
-
-### Color markup (`colorSymbol`)
-
-With `colorSymbol: [{color: "#FFFF60", symbol: "_"}]`:
-
-- `_text_` between matching symbols renders in that color
-- Colors stack and can be nested; each symbol toggles its color on/off
+- Omitted fields keep the base style
+- One symbol can set both color and weight
+- Styles stack and can be nested; each symbol toggles its entry on/off
 
 ### Segment splitting (`segmentSymbol`)
 
@@ -71,13 +65,25 @@ onTextSegment: (textLength) => {
 
 ### Escaping special characters (`escapeSymbol`)
 
-Prefix a special character (bold, color, or segment symbol, or the escape symbol itself) with the escape symbol to render it literally: `\\*`, `\\_`, `\\;`, `\\\\`.
+Prefix a special character (style, segment, or escape symbol itself) with the escape symbol to render it literally: `\\*`, `\\_`, `\\;`, `\\\\`.
 
 > The escape character itself is consumed during parsing and does not appear in the rendered output.
 
 ```js
 _.newText({text: "Use \\\\ to *escape*; special characters (like \\* or \\;)."});
 ```
+
+### Line breaks (`\n`)
+
+A literal newline character in the text forces a hard line break, independent of `maxWidth` wrapping:
+
+```js
+_.newText({text: "First line.\nSecond line."});
+```
+
+- Newlines are not markup symbols - they work with every configuration and cannot be disabled.
+- Consecutive newlines collapse: blank lines create no vertical gap.
+- Style state (`color`/`fontWeight`) carries across breaks.
 
 ### Disabling markup per-call
 
@@ -91,12 +97,12 @@ _.newText({text: "This has a ; that should not split.", segmentSymbol: null});
 ## Rendering pipeline
 
 1. Input text string
-2. `tokenizeText()` (`textParser.js`) - parse bold, color, and escape markers into tokens `[{text, bold, color}, ...]`
-3. `chunkTokens()` - split tokens into word/space chunks
-4. `splitLines()` - measure widths and wrap at `maxWidth` (trailing spaces removed; `balancedWidth` re-wraps with a reduced width)
-5. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, bold, color}, ...]`
-6. `pushTextLine()` (`engine.js`) - measure segments, compute centered x-positions, push visual events; calls `prop.onTextSegment(textLength)` at each `"wait"` marker
-7. `newText()` (`engine.js`) - calls `prop.onTextSegment(textLength)` once at the end with the remaining accumulated length
+2. `tokenizeText()` (`textParser.js`) - parse style and escape markers into tokens `[{text, color, fontWeight}, ...]`
+3. `chunkTokens()` - split tokens into word/space chunks, emitting `{break: true}` markers at `\n` characters
+4. `splitLines()` - measure widths and wrap at `maxWidth` (trailing spaces removed; break markers flush the current line; `balancedWidth` re-wraps with a reduced width)
+5. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, color, fontWeight}, ...]`
+6. `pushTextLine()` (`textEvents.js`) - measure segments, compute centered x-positions, push visual events; calls `prop.onTextSegment(textLength)` at each `"wait"` marker
+7. `newText()` (`textEvents.js`) - calls `prop.onTextSegment(textLength)` once at the end with the remaining accumulated length
 8. `render.js` - draws each text event at `(width / 2 + posX, height / 2 + posY)` with `textAlign: center`, `textBaseline: middle`
 
 ## Size hierarchy

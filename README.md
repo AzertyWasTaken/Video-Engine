@@ -60,13 +60,20 @@ Creators return the group id (auto-assigned when `id` is omitted), and a `durati
 | Path | Role |
 | - | - |
 | `anim_*.js` | Self-contained animation scripts (entry points). `anim_template.js` is the starter template. |
-| `Engine/engine.js` | Core timeline builder: time cursor, event arrays, all `_.` methods |
+| `Engine/engine.js` | Public `Engine` facade: all `_.` methods (time cursor, params, audio, queries) |
+| `Engine/state.js` | Global engine state: event arrays, time cursor, auto-id counter, text configs |
+| `Engine/validate.js` | Shared validation helpers (property types, ids, durations) |
+| `Engine/visualEvents.js` | Table-driven visual event creation (`pushVisual`) and group centering |
+| `Engine/tweens.js` | Property and color tween chains (`animate()`, `moveTo()`, `recolor()`) |
+| `Engine/textEvents.js` | Text event layout and creation (`newText()`) |
+| `Engine/chapters.js` | Chapter/scene markers (`chapter()`, `scene()`, `getChapters()`) |
 | `Engine/param.js` | Default property objects per type (`text`, `line`, `rect`, `circle`, `image`) |
 | `Engine/textParser.js` | Text tokenization (markup), width measurement, line wrapping, segment splitting |
 | `Engine/easing.js` | Easing functions for tweens (`linear`, `quad*`, `cubic*`) |
 | `Engine/render.js` | Per-frame Canvas renderer (cached sort + binary search, tween resolution) |
 | `Engine/record.js` | Streams frames to FFmpeg, producing `visual.mp4` (also preloads image assets) |
 | `Engine/addSounds.js` | Delays and mixes audio events over the video, producing `audio.mp4` |
+| `Engine/pipeline.js` | One-call render helper (`renderVideo`, `getTimeline`) |
 | `Engine/utils.js` | Shared FFmpeg path and caller path resolution |
 
 ## Documentation

@@ -15,8 +15,7 @@ export const Param = {
         maxWidth: Infinity, // Line-wrap threshold (pixels)
         balancedWidth: false, // Balanced text width
 
-        boldSymbol: null, // Enable bold markup parsing with selected symbol
-        colorSymbol: [], // Enable color markup parsing with selected symbol
+        styleSymbol: [], // Style markup entries [{symbol, color?, fontWeight?}]
         segmentSymbol: null, // Enable segment splitting with selected symbol
         escapeSymbol: null, // Enable escaping special characters with selected symbol
 
@@ -54,6 +53,8 @@ export const Param = {
         width: 256,
         height: 256,
         color: "#FFFFFF",
+        strokeColor: null, // Stroke color; null disables the stroke
+        strokeWidth: 4, // Stroke width in pixels
 
         posX: 0, // Horizontal offset from center
         posY: 0, // Vertical offset from center (before alignment)
@@ -68,6 +69,8 @@ export const Param = {
 
         diameter: 40,
         color: "#FFFFFF",
+        strokeColor: null, // Stroke color; null disables the stroke
+        strokeWidth: 4, // Stroke width in pixels
 
         posX: 0, // Horizontal offset from center
         posY: 0, // Vertical offset from center (before alignment)

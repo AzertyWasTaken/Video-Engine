@@ -18,7 +18,7 @@ function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
     execFileSync(ffmpegPath, ffmpegArgs, {stdio: "inherit"});
 
     console.log("Completed");
-    process.exit(0);
+    return {videoFilePath, outputFilePath, audioEvents: 0};
 }
 
 // Build filter_complex by creating one delayed stream per *valid* audio event.
@@ -130,6 +130,7 @@ export function addSounds(rawAudioEvents, videoDuration, callerFilePath) {
     catch (error) {
         console.error("Failed:", error.message || error);
         console.log("Args:", ffmpegArgs);
-        process.exit(error.status || 1);
+        throw error;
     }
+    return {videoFilePath, outputFilePath, audioEvents: audioEvents.length};
 }

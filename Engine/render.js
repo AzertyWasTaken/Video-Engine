@@ -1,12 +1,14 @@
 "use strict";
-import {createCanvas, loadImage} from "@napi-rs/canvas";
+import {Canvas, loadImage} from "skia-canvas";
 
 let canvas, width, height;
 const imageCache = new Map();
 
 // Cache for sorted events to avoid re-sorting every frame.
-// The cache is invalidated when the visual array reference changes.
+// Invalidated when the visual array reference or length changes
+// (events are only pushed, so the length check catches new events).
 let cachedVisualRef = null;
+let cachedVisualLength = -1;
 let cachedSortedEvents = null;
 
 // Reused per-frame tween buffers (cleared at the start of every frame).
@@ -14,18 +16,20 @@ const tweenOffsets = new Map(); // targetId -> {key: offset value}
 const tweenColors = new Map();  // drawable event -> css color string
 
 export function setCanvas(WIDTH, HEIGHT) {
-    canvas = createCanvas(WIDTH, HEIGHT);
+    canvas = new Canvas(WIDTH, HEIGHT);
+    canvas.gpu = true;
     width = WIDTH;
     height = HEIGHT;
 }
 
 // Sort events by start time once, cache the result.
-// Invalidated automatically when the visual array reference changes.
+// Invalidated automatically when the visual array reference or length changes.
 function getSortedEvents(visual) {
-    if (cachedVisualRef !== visual) {
+    if (cachedVisualRef !== visual || visual.length !== cachedVisualLength) {
         cachedSortedEvents = [...visual]
         .sort((a, b) =>(a.start ?? 0) - (b.start ?? 0));
         cachedVisualRef = visual;
+        cachedVisualLength = visual.length;
     }
     return cachedSortedEvents;
 }
@@ -112,12 +116,47 @@ export function render(visual, t) {
     const objects = [];
     pushRelevantObjects(objects, t, visual);
 
-    const background = visual.findLast((obj) =>
-        obj.type === "background" && t >= obj.start
-    );
+    // Find the active background plus the previous one (crossfade underlay).
+    let background = null;
+    let prevBackground = null;
+    for (let i = visual.length - 1; i >= 0; i--) {
+        const obj = visual[i];
+        if (obj.type !== "background" || t < (obj.start ?? 0)) continue;
 
-    ctx.fillStyle = background ? background.color : "#000000";
+        if (background !== null) {
+            prevBackground = obj;
+            break;
+        }
+
+        if (t < (obj.end ?? Infinity)) background = obj;
+    }
+
+    ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
+
+    if (background) {
+        // Fade the color in over the previous background (fadeOut reverses it).
+        const opacity = Math.min(
+            background.fadeIn <= 0 ? 1 : Math.min((t - background.start) / background.fadeIn, 1),
+            background.fadeOut <= 0 ? 1 : Math.min(((background.end ?? Infinity) - t) / background.fadeOut, 1)
+        );
+
+        if (opacity < 1) {
+            if (prevBackground) {
+                ctx.fillStyle = prevBackground.color;
+                ctx.fillRect(0, 0, width, height);
+            }
+
+            ctx.globalAlpha = opacity;
+            ctx.fillStyle = background.color;
+            ctx.fillRect(0, 0, width, height);
+            ctx.globalAlpha = 1;
+        }
+        else {
+            ctx.fillStyle = background.color;
+            ctx.fillRect(0, 0, width, height);
+        }
+    }
 
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -164,12 +203,25 @@ export function render(visual, t) {
             );
             ctx.fillStyle = colorOverride ?? obj.color;
             ctx.fill();
+
+            if (obj.strokeColor) {
+                ctx.lineWidth = obj.strokeWidth;
+                ctx.strokeStyle = obj.strokeColor;
+                ctx.stroke();
+            }
         }
         else if (obj.type === "circle") {
             ctx.beginPath();
-            ctx.arc(posX, posY, obj.diameter + (tw?.diameter ?? 0), 0, 2 * Math.PI);
+            const radius = Math.max(0, (obj.diameter + (tw?.diameter ?? 0)) / 2);
+            ctx.arc(posX, posY, radius, 0, 2 * Math.PI);
             ctx.fillStyle = colorOverride ?? obj.color;
             ctx.fill();
+
+            if (obj.strokeColor) {
+                ctx.lineWidth = obj.strokeWidth;
+                ctx.strokeStyle = obj.strokeColor;
+                ctx.stroke();
+            }
         }
         else if (obj.type === "line") {
             ctx.beginPath();

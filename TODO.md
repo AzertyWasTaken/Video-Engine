@@ -4,32 +4,33 @@
 
 ## Update log
 
-- Refractor and split `README.md`
+- Timeline ergonomics: `waitUntilIdle()`, scene/chapter markers (`chapter()`, `scene()`, `getChapters()`), `setText()` options object (`{fade, hold}`)
+- `clear()` truncates `duration`-bearing events at the cursor (fixes crossfades over such events via `setText()`)
 - Auto-assigned unique ids; visual creators return the group id
 - `duration` property auto-ends events (no manual `wait` + `clear` pairs)
-- `withProp()` scoped defaults and per-type param checkpoints
 - `seek()` for absolute time cursor jumps
 - Tween system: `animate()`, `moveTo()`, `recolor()` with `Engine/easing.js`
-- Table-driven visual event creation (`VISUAL_FIELDS` + `pushVisual`)
-- Shared `Engine/utils.js` for FFmpeg path and caller path resolution
-- Input validation with descriptive engine errors
-- `getEvents()` timeline query helper
-- Fixed missing `rect` case in `getItemSize()` (centering rect groups threw)
-- Fixed rect path accumulation in `render.js` (ghost shapes across frames)
-- Extended params with addons
 - Moving effect (`animate()` / `moveTo()`)
 - Size changing effect (tween `fontSize`, `diameter`, `width`, `height`, `lengthX`, `lengthY`, `lineWidth`)
 - Color changing effect (`recolor()`)
 - Set-prop tween (`moveTo()` takes absolute targets for any tweenable property)
 - Change `moveTo` to set prop tween
+- Merge bold and color wrappings to style
+- Line breaks in text with `\n`
+- Background fades and auto-end (`setBackgroundColor(color, {fadeIn, fadeOut, duration})`)
+- Strokes for circles and rectangles (`strokeColor`, `strokeWidth`)
+- Easing families: `sin`, `expo`, `circ`, `back`, `elastic` (In/Out/InOut)
 
 ## Features
 
-- [ ] Circles and rectangles strokes
+- [ ] Relative position
+- [ ] Auto text size (to fit width)
+- [ ] Auto In/Out/InOut easing.
+- [ ] Italic wrapping
+- [ ] Braces wrapping (`*text* -> {b text}`)
 - [ ] Custom sound for last text segment
 - [ ] Bullet lists
 - [ ] Table
-- [ ] Italic wrapping `|`
 - [ ] Exponentiation wrapping `^`
 - [ ] Blend texts with additive compensation
 - [ ] Revamp fading and flash effect
@@ -39,11 +40,10 @@
 
 ## Coding
 
-- [ ] Refractor `enigne.js`
 - [ ] Global properties (params inheritance)
-- [ ] Make property locally editable
-- [ ] Set default type to global
-- [ ] Fix text resizing bug
+  - [ ] Make property locally editable
+  - [ ] Set default type to global
+- [ ] Fix text resizing animation bug
 
 ## Template
 
@@ -55,7 +55,6 @@
 - Text typing effect
 - Code blocks with font `monospace`
 - Support special characters
-- Break text line
 - Fading set text option
 - `render.js` accept only tweening with smooth transitions
 - Module for appending instance objects
