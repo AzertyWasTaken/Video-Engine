@@ -5,6 +5,7 @@ export const Param = {
         id: null, // Id or array of ids; a unique negative id is auto-assigned when omitted
         posX: 0, // Horizontal offset from center
         posY: 0, // Vertical offset from center (before alignment)
+        rotation: 0, // Clockwise rotation in degrees about the object's anchor
         alignX: 0, // Horizontal alignment: -1 (left), 0 (center), 1 (right)
         alignY: 0, // Vertical alignment: -1 (top), 0 (center), 1 (bottom)
         fadeIn: 0, // Fade-in duration (seconds) from transparent to full opacity
@@ -74,7 +75,7 @@ export const Param = {
 };
 
 // Keys backed by Param.global: a type value of undefined inherits the global one.
-export const GLOBAL_KEYS = ["id", "posX", "posY", "alignX", "alignY", "fadeIn", "fadeOut", "opacity", "duration"];
+export const GLOBAL_KEYS = ["id", "posX", "posY", "rotation", "alignX", "alignY", "fadeIn", "fadeOut", "opacity", "duration"];
 
 // Effective default for one key: the type's value, or the global when undefined.
 export function effectiveParam(type, key) {

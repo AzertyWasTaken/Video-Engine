@@ -78,6 +78,11 @@ export function validateDuration(duration) {
         throw new Error(`Duration must be a finite number of seconds, got ${duration}.`);
 }
 
+export function validateRotation(rotation) {
+    if (typeof rotation !== "number" || !Number.isFinite(rotation))
+        throw new Error(`Rotation must be a finite number of degrees, got ${rotation}.`);
+}
+
 export function validateOpacity(opacity) {
     if (typeof opacity !== "number" || !Number.isFinite(opacity) || opacity < 0 || opacity > 1)
         throw new Error(`Opacity must be a finite number from 0 to 1, got ${opacity}.`);

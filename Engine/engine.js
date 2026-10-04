@@ -1,7 +1,7 @@
 "use strict";
 import {Param, effectiveParam} from "./param.js";
 import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId} from "./state.js";
-import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateOpacity} from "./validate.js";
+import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateOpacity, validateRotation} from "./validate.js";
 import {setAssets as setAssetMap, getAssets as getAssetMap} from "./assets.js";
 import {getGroupCenter, pushVisual as pushVisualEvent} from "./visualEvents.js";
 import {addChapter as pushChapter, runScene as runSceneEvent} from "./chapters.js";
@@ -105,8 +105,12 @@ export const Engine = {
         requireType(type);
 
         for (const key in newProp) {
+            // `undefined` re-inherits the global default on a type, so it skips validation.
             if (key === "opacity" && (type === "global" || newProp[key] !== undefined))
                 validateOpacity(newProp[key]);
+
+            if (key === "rotation" && (type === "global" || newProp[key] !== undefined))
+                validateRotation(newProp[key]);
 
             Param[type][key] = newProp[key];
         }
@@ -232,7 +236,7 @@ export const Engine = {
         const source = visual.find((value) => value.type === "text" && matchesIds(value, ids));
         const baked = {};
         if (source) {
-            for (const key of ["posX", "posY", "fontSize", "opacity"]) {
+            for (const key of ["posX", "posY", "rotation", "fontSize", "opacity"]) {
                 const offset = getPropertyOffset(source, key);
                 if (offset === 0) continue;
 

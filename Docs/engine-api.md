@@ -90,7 +90,7 @@ _.newCircle({diameter: 50, hold: 1});              // same as newCircle(...) the
 
 Default properties per type (`"text"`, `"line"`, `"rect"`, `"circle"`, `"image"`) live in `Engine/param.js` and persist across calls. Properties passed directly to `newText()` etc. are merged on top for that call only.
 
-The nine shared keys (`id`, `posX`, `posY`, `alignX`, `alignY`, `fadeIn`, `fadeOut`, `opacity`, `duration`) also have a `global` default. Each type declares them as `undefined` and inherits the global value; setting one on a type (or per call) overrides it locally, and setting it back to `undefined` re-inherits. `opacity` ranges from `0` (invisible) to `1` (opaque).
+The ten shared keys (`id`, `posX`, `posY`, `rotation`, `alignX`, `alignY`, `fadeIn`, `fadeOut`, `opacity`, `duration`) also have a `global` default. Each type declares them as `undefined` and inherits the global value; setting one on a type (or per call) overrides it locally, and setting it back to `undefined` re-inherits. `opacity` ranges from `0` (invisible) to `1` (opaque). `rotation` is in clockwise degrees about the object's anchor (`posX`/`posY` for shapes, the layout anchor for text) and must be a finite number; `setText()` carries a rotation tween's current offset into the replacement text.
 
 Opacity is captured on the event when it is created, so later global-default changes do not affect existing objects.
 
@@ -111,7 +111,7 @@ _.withProp(newProp, type, fn)              // Scoped defaults: apply, run fn(), 
 _.withProp({type: newProp, ...}, fn)       // Scoped defaults for multiple types at once
 ```
 
-- `type` also accepts `"global"` for the nine shared keys: `_.setProp({opacity: 0.5}, "global")` changes every type that has not set its own `opacity`, and the multi-type form accepts it too (`_.withProp({global: {...}, circle: {...}}, fn)`). `getProp()` reports the effective (inherited) value; `getGlobalProp()` returns the raw object where inherited keys are `undefined`.
+- `type` also accepts `"global"` for the ten shared keys: `_.setProp({opacity: 0.5}, "global")` changes every type that has not set its own `opacity`, and the multi-type form accepts it too (`_.withProp({global: {...}, circle: {...}}, fn)`). `getProp()` reports the effective (inherited) value; `getGlobalProp()` returns the raw object where inherited keys are `undefined`.
 - `changeProp()` throws `Nonnumber values are not accepted` if the current value or the delta is not finite. Use `setProp()` for non-numeric properties. `opacity` must remain a finite number from `0` to `1`.
 - Checkpoint stacks are **per type**: `saveParam("circle")` pairs with `undoParam("circle")`, and mixing types cannot pop the wrong checkpoint. `undoParam()` throws when no checkpoint exists for the type.
 - `withProp(newProp, fn)` defaults to `type: "text"`. The snapshot is restored in a `finally` block, even when `fn()` throws:
@@ -211,7 +211,7 @@ _.wait(1);
 
 Rules:
 
-- `animate()` deltas are **relative**: `{posX: -200}` slides the group 200 px left of where it is right now. Tweenable properties: `posX`, `posY`, `fontSize`, `diameter`, `width`, `height`, `scaleX`, `scaleY`, `lineWidth`, `strokeWidth`, `opacity`. Anything else throws.
+- `animate()` deltas are **relative**: `{posX: -200}` slides the group 200 px left of where it is right now. Tweenable properties: `posX`, `posY`, `rotation`, `fontSize`, `diameter`, `width`, `height`, `scaleX`, `scaleY`, `lineWidth`, `strokeWidth`, `opacity`. Anything else throws.
 - `moveTo()` targets are **absolute** final values: `posX`/`posY` place the bounding-box center of the group at that canvas offset (like `centerText()`), and any other key ends with the property rendered at exactly that value (`{fontSize: 40}` ends at font size 40). Omit keys to leave properties untouched. An `opacity` target must be from `0` to `1` - anything else throws, like `setProp()`.
 - A tweened `opacity` is combined with the object's `fadeIn`/`fadeOut` progress and clamped to `0`..`1`, so an overshooting easing (`back` / `elastic`) never draws out of range. `animate()` deltas are not range-checked (a delta's valid range depends on the value it starts from) - the clamp handles them.
 - `opts.easing` is one of `linear` (default), `quad`, `cubic`, `sin`, `expo`, `circ`, `back`, `elastic` (see `Engine/easing.js`), or a custom `(t) => easedT` function.

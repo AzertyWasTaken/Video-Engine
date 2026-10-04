@@ -23,7 +23,9 @@
 | Text not centered horizontally | `posX` offsets not accounted for | Use `_.centerText()` to reposition a group after positioning |
 | Circle is larger/smaller than expected | `diameter` is passed as the canvas arc **radius** | Halve or double the value as needed (see [visuals.md](./visuals.md)) |
 | `undoParam` throws "No saved checkpoint" | Checkpoint stacks are per type and `undoParam` pops only that type's stack | Call `_.saveParam(type)` before `_.undoParam(type)` with the same type |
-| `animate()`/`moveTo()` reject the property | Property is not tweenable | Use one of `posX`, `posY`, `fontSize`, `diameter`, `width`, `height`, `scaleX`, `scaleY`, `lineWidth`, `strokeWidth`, `opacity` |
+| `animate()`/`moveTo()` reject the property | Property is not tweenable | Use one of `posX`, `posY`, `rotation`, `fontSize`, `diameter`, `width`, `height`, `scaleX`, `scaleY`, `lineWidth`, `strokeWidth`, `opacity` |
+| Object not rotated | `rotation` must be a finite number of degrees | Pass e.g. `rotation: 45` (clockwise); a non-number throws "Rotation must be a finite number of degrees" |
+| Rotated text segments spin apart | Text rotated per segment | Not possible - text pivots on its layout anchor, so a whole block turns as one; make sure the rotated text is one `newText()` call |
 | `moveTo()` throws "Opacity must be a finite number from 0 to 1" | Absolute `opacity` target outside `0`..`1` | Pass a value from `0` to `1`, or use `animate()` with a relative delta |
 | `moveTo()` throws "no visual events with id ... define ..." | The targeted id has no such property (e.g. `diameter` on text) | Target only properties the element type defines |
 | `animate()`/`moveTo()`/`recolor()` throw "no visual events with id" | Elements not created yet, or wrong id | Create the elements first; capture the id returned by the creator |

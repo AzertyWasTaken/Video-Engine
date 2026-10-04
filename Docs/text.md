@@ -6,7 +6,7 @@ Text is created with `_.newText(newProp)` and rendered by `Engine/render.js`. Th
 
 For default-property helpers (`setProp`, `changeProp`, checkpoints), see [engine-api.md](./engine-api.md).
 
-`_.newText()` returns the group's ids (array). Common properties shared by all creators (`id`, `duration`, `posX`/`posY`, `fadeIn`/`fadeOut`, `opacity`) are listed in [visuals.md](./visuals.md#common-properties-object-creators).
+`_.newText()` returns the group's ids (array). Common properties shared by all creators (`id`, `duration`, `posX`/`posY`, `rotation`, `fadeIn`/`fadeOut`, `opacity`) are listed in [visuals.md](./visuals.md#common-properties-object-creators).
 
 ## Text configuration properties
 

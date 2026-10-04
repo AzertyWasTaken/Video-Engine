@@ -77,7 +77,7 @@ function testGlobal() {
 
 function testText() {
     // `duration` ends the event automatically (no clear needed)
-    _.newText({text: "Text example with yellow flash effect.", flashDuration: 0.5, duration: 1});
+    _.newText({text: "Text example with yellow flash effect.", flashDuration: 0.5, duration: 1, rotation: 15});
     _.wait(1);
 
     // Creators return the group id (auto-assigned when omitted)
@@ -166,6 +166,13 @@ function testVisual() {
     _.newRect({id: "strokes", posX: -200, posY: 0, width: 320, height: 240, color: "#000040", strokeColor: "#FFE040", strokeWidth: 8});
     _.newCircle({id: "strokes", posX: 200, posY: 0, diameter: 80, color: "#400000", strokeColor: "#FF4040", strokeWidth: 6});
     _.wait(1);
+
+    // Rotation: clockwise degrees about each object's anchor, applied to every object type
+    _.newRect({id: "rotation", posX: -300, posY: 0, width: 300, height: 60, rotation: 30, color: "#60FF60"});
+    _.newLine({id: "rotation", posX: 0, positions: [{x: -120, y: 120}, {x: 120, y: -120}], scaleX: 1.2, scaleY: 0.4, rotation: -25, color: "#FFE040", lineWidth: 12});
+    _.newImage({id: "rotation", posX: 300, width: 200, height: 200, src: "favicon", rotation: 45});
+    _.newText({id: "rotation", text: "Rotated", posY: -200, rotation: 15, fontSize: 60, maxWidth: Infinity});
+    _.wait(1);
 }
 
 function testAnim() {
@@ -221,6 +228,15 @@ function testAnim() {
     _.moveTo(ghost, {opacity: 1}, 1, {easing: "quad", direction: "inOut"});
     _.wait(1);
     _.clear(ghost, 1);
+
+    // Rotation is tweenable as well: a relative spin, then an absolute angle
+    const spinner = _.newRect({width: 300, height: 300, posY: 240, strokeColor: "#FFE040", strokeWidth: 10, color: "#000040"});
+    _.wait(0.5);
+    _.animate(spinner, {rotation: 180}, 1, {easing: "quad", direction: "inOut"});
+    _.wait(1);
+    _.moveTo(spinner, {rotation: 360}, 1, {easing: "quad", direction: "inOut"});
+    _.wait(1);
+    _.clear(spinner, 1);
 }
 
 // Scenes: named chapters with recorded boundaries (optional leading pad)
@@ -243,8 +259,8 @@ function testScenes() {
 // _.seek(_.getDuration() + 1);
 
 // testGlobal();
-// testText();
-testVisual();
+testText();
+// testVisual();
 // testAnim();
 // testScenes();
 

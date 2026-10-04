@@ -6,7 +6,7 @@ import {getGroupCenter} from "./visualEvents.js";
 
 // Properties that can be tweened with animate() / moveTo().
 const TWEEN_KEYS = new Set([
-    "posX", "posY", "fontSize", "diameter",
+    "posX", "posY", "rotation", "fontSize", "diameter",
     "width", "height", "scaleX", "scaleY",
     "lineWidth", "strokeWidth", "opacity"
 ]);

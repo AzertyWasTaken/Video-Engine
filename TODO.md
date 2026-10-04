@@ -4,6 +4,7 @@
 
 ## Update log
 
+- Rotation: a `rotation` property (clockwise **degrees**, default `0`) is now a shared `global` default for every object type - text, lines, rects, circles and images. It rotates around the object's anchor (`posX`/`posY` for shapes, the layout anchor for text, so a multi-line or multi-segment text turns as one unit) and is tweenable, so `animate(id, {rotation: 360})` and `moveTo(id, {rotation: 180})` both work. Rotation is a drawing transform only: stored `width`/`height`/`positions` stay unrotated, so alignment and `centerText()` keep using the unrotated bounding box. Replaces the "Rotation global" item below
 - Rendering resolution: `CONFIG` takes an optional `SCALE` (default `1`) that multiplies the encoded resolution without touching the framing - `WIDTH/HEIGHT` stay the design space every event is positioned in, while the canvas, FFmpeg's `-video_size` and the frame readback are `WIDTH * SCALE x HEIGHT * SCALE` pixels. `{WIDTH: 1920, HEIGHT: 1080, FPS: 12, SCALE: 2}` records 3840x2160 with identical composition (a sharper output, at proportionally more pixels and encode time). Fractional values work (`1.5` -> 2880x1620)
 - Closed lines and default position axes: `_.newLine()` takes a `loop` option (default `false`) that closes the path by stroking one extra segment from the last vertex back to the first.
 - Every `positions` entry may now omit `x` or `y` - a missing axis defaults to `0`, so `positions: [{x: 120}, {y: -60}]` is a valid pair of vertices. `loop` requires at least 3 positions and throws otherwise
@@ -19,11 +20,10 @@
 ## Features
 
 - [ ] Change text font with wrapping style TODO
+- [ ] Set text to italic with wrapping style TODO
 - [ ] Auto color symbols (option to color specific symbols only) TODO
 - [ ] Repeat & auto cancel tween mode TODO
-- [ ] Rotation global
 - [ ] Generate chapters timestamps
-- [ ] Italic wrapping
 - [ ] Custom sound for last text segment
 - [ ] Bullet lists
 - [ ] Table
@@ -32,12 +32,11 @@
 
 ## Quality
 
+- [ ] Remove flash parameter TODO
 - [ ] Layout order TODO
-- [ ] Centered line if positions has a single element TODO
 - [ ] Run multiple chapters merged in a single video TODO
 - [ ] Auto volume modifier for sound shorthand TODO
 - [ ] Relative position option TODO
-- [ ] Revamp fading and flash effect
 - [ ] Reverse text segments order option
 - [ ] Last text segment delay option
 
@@ -49,7 +48,6 @@
 - Text typing effect
 - Code blocks with font `monospace`
 - Support special characters
-- Fading set text option
 - `render.js` accept only tweening with smooth transitions
 - Module for appending instance objects
 - Set text fading with additive compensation

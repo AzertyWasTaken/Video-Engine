@@ -5,16 +5,16 @@ import {getTime, advanceTime, nextAutoId, visual} from "./state.js";
 import {
     matchesIds, normalizeIds, normalizePositions,
     requireType, resolveDuration,
-    validateDuration, validateLoop, validateOpacity, validateScales
+    validateDuration, validateLoop, validateOpacity, validateRotation, validateScales
 } from "./validate.js";
 
 // Fields copied from the merged config into each visual event.
 // Adding a visual type means one entry here plus a draw branch in render.js.
 const VISUAL_FIELDS = {
-    line: ["posX", "posY", "positions", "scaleX", "scaleY", "lineWidth", "loop", "color", "fadeIn", "fadeOut", "opacity"],
-    rect: ["posX", "posY", "width", "height", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity"],
-    circle: ["posX", "posY", "diameter", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity"],
-    image: ["src", "posX", "posY", "width", "height", "fadeIn", "fadeOut", "opacity"]
+    line: ["posX", "posY", "rotation", "positions", "scaleX", "scaleY", "lineWidth", "loop", "color", "fadeIn", "fadeOut", "opacity"],
+    rect: ["posX", "posY", "rotation", "width", "height", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity"],
+    circle: ["posX", "posY", "rotation", "diameter", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity"],
+    image: ["posX", "posY", "rotation", "src", "width", "height", "fadeIn", "fadeOut", "opacity"]
 };
 
 // Bounding box of an event relative to its posX/posY anchor, used for
@@ -94,6 +94,7 @@ export function pushVisual(type, newProp) {
 
     const prop = mergeParam(type, newProp);
     validateOpacity(prop.opacity);
+    validateRotation(prop.rotation);
     prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
 
     if (type === "line") {

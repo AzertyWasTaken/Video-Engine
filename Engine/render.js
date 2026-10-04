@@ -152,6 +152,7 @@ export function render(visual, t) {
         if (t < (obj.end ?? Infinity)) background = obj;
     }
 
+    ctx.globalAlpha = 1;
     ctx.fillStyle = "#000000";
     ctx.fillRect(0, 0, width, height);
 
@@ -198,6 +199,21 @@ export function render(visual, t) {
         const posX = width / 2 + obj.posX + (tw?.posX ?? 0);
         const posY = height / 2 + obj.posY + (tw?.posY ?? 0);
         const colorOverride = tweenColors.get(obj);
+
+        // Rotation pivots on the layout anchor for text (so a multi-segment or
+        // multi-line block turns as one unit) and on posX/posY for every other
+        // type, which is the bounding-box center. Unrotated objects skip the
+        // transform entirely so the common path stays untouched.
+        const rotation = (obj.rotation ?? 0) + (tw?.rotation ?? 0);
+        if (rotation !== 0) {
+            const pivotX = obj.anchorX === undefined ? posX : width / 2 + obj.anchorX + (tw?.posX ?? 0);
+            const pivotY = obj.anchorY === undefined ? posY : height / 2 + obj.anchorY + (tw?.posY ?? 0);
+
+            ctx.save();
+            ctx.translate(pivotX, pivotY);
+            ctx.rotate(rotation * Math.PI / 180);
+            ctx.translate(-pivotX, -pivotY);
+        }
 
         if (obj.type === "text") {
             if (colorOverride) {
@@ -289,6 +305,7 @@ export function render(visual, t) {
         }
 
         ctx.globalAlpha = 1;
+        if (rotation !== 0) ctx.restore();
     }
 
     return canvas;

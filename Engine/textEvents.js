@@ -2,7 +2,7 @@
 import {Param, effectiveParam, mergeParam} from "./param.js";
 import {getSegmentsWidth, wrapTextSegments} from "./textParser.js";
 import {getTime, advanceTime, nextAutoId, textProp, visual} from "./state.js";
-import {normalizeIds, requireType, resolveDuration, validateDuration, validateOpacity} from "./validate.js";
+import {normalizeIds, requireType, resolveDuration, validateDuration, validateOpacity, validateRotation} from "./validate.js";
 
 // Accumulated text length across segments; reset per newText() and consumed
 // by onTextSegment callbacks at "wait" markers.
@@ -19,6 +19,7 @@ function pushTextSegment(prop, seg, posX, posY, end) {
         // anchor, so a tweened font size scales the whole layout about it.
         anchorX: prop.posX,
         anchorY: prop.posY,
+        rotation: prop.rotation,
         fontFamily: prop.fontFamily,
         fontSize: prop.fontSize,
         fontColor: seg.color ?? prop.fontColor,
@@ -72,6 +73,7 @@ export function newText(newProp) {
 
     const prop = mergeParam("text", newProp);
     validateOpacity(prop.opacity);
+    validateRotation(prop.rotation);
 
     if (typeof prop.text !== "string")
         throw new Error(`Text must be a string, got ${typeof prop.text}.`);
