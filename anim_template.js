@@ -1,13 +1,12 @@
 "use strict";
-import path from "path";
-import {fileURLToPath} from "url";
 import {Engine as _} from "./Engine/engine.js";
 import {renderVideo} from "./Engine/pipeline.js";
 
 const CONFIG = {
     WIDTH: 1920,
     HEIGHT: 1080,
-    FPS: 12
+    FPS: 12,
+    SCALE: 720/1080
 };
 
 function textDelay(length) {
@@ -15,12 +14,15 @@ function textDelay(length) {
 }
 
 function onTextSegment(textLength) {
-    _.playSound("Sounds/click.wav", 2);
+    _.playSound("click", 2);
     _.wait(Math.floor(textLength / 12 + 2) / 2);
 }
 
-// Sounds resolve relative to this script
-_.setAudioFile(path.dirname(fileURLToPath(import.meta.url)));
+// Sounds and images use the short names registered here
+_.setAssets({
+    click: "./Sounds/click.wav",
+    favicon: "./Images/favicon.png"
+});
 
 _.setBackgroundColor("#000080");
 
@@ -31,15 +33,52 @@ _.setProp({
     segmentSymbol: ";",
     escapeSymbol: "\\",
     styleSymbol: [
-        {symbol: "*", fontWeight: 700},
-        {symbol: "_", color: "#FF6060"},
+        {openSymbol: "*", fontWeight: 700},
+        {openSymbol: "_", color: "#FF4040"},
+        {openSymbol: "{y ", closeSymbol: "}", color: "#FFE040"},
+        {openSymbol: "<<", closeSymbol: ">>", color: "#60FF60"},
     ],
 });
+
+function testGlobal() {
+    // Wait
+    const wait = _.newText({text: "Wait"});
+    _.wait(1);
+    _.clear(wait);
+
+    // Duration
+    const duration = _.newText({text: "Duration", duration: 1});
+    _.waitUntilIdle();
+    _.clear(duration);
+
+    // Hold
+    const hold = _.newText({text: "Hold", hold: 1});
+    _.clear(hold);
+
+    // Multiple ids
+    _.newCircle({id: ["shape", "white"], posX: -200, diameter: 80});
+    _.newCircle({id: ["shape", "red"], posX: 200, diameter: 80});
+    _.wait(1);
+    _.recolor("red", "#FF4040");
+    _.wait(1);
+    _.playSound("click", 2);
+    _.animate("shape", {posY: 160}, 1);
+    _.wait(1);
+    _.clear("shape");
+
+    // Multi-type scoped defaults: text and circle change and restore together
+    _.withProp({text: {fontSize: 60}, circle: {color: "#FFE040", diameter: 60}}, () => {
+        _.newText({id: "multi", text: "Multi-type scoped defaults.", posY: -160});
+        _.newCircle({id: "multi", posY: 160, duration: 1});
+        _.wait(1);
+        _.clear("multi");
+    });
+}
 
 function testText() {
     // `duration` ends the event automatically (no clear needed)
     _.newText({text: "Text example with yellow flash effect.", flashDuration: 0.5, duration: 1});
-    _.waitUntilIdle();
+    _.wait(1);
 
     // Creators return the group id (auto-assigned when omitted)
     const boldText = _.newText({text: "Text with *a bold* segment."});
@@ -48,8 +87,7 @@ function testText() {
 
     // Scoped defaults: withProp saves and restores automatically
     _.withProp({id: "segments"}, () => {
-        _.newText({text: "This text is so long it; takes multiple lines and; has two segments.", onTextSegment});
-        _.wait(2);
+        _.newText({text: "This text is so long it; takes multiple lines and; has two segments.", onTextSegment, hold: 2});
         _.clear("segments");
     });
 
@@ -62,9 +100,7 @@ function testText() {
         _.changeProp({posY: 160});
         _.wait(1);
 
-        _.newText({text: "Just a long _text_ block; for *testing* purposes.", segmentSymbol: null, maxWidth: 800, onTextSegment});
-        _.wait(2);
-
+        _.newText({text: "Just a long text block; for *testing* purposes.", segmentSymbol: null, maxWidth: 800, onTextSegment, hold: 1});
         _.centerText("colors", 0, 0);
         _.clear("colors");
     });
@@ -85,41 +121,50 @@ function testText() {
     // Balanced width
     _.withProp({id: "width"}, () => {
         _.newText({text: "This multiline text serves to test balanced wrapping option.", posY: -160});
-        _.wait(1);
-
         _.newText({text: "This multiline text serves to test balanced wrapping option.", posY: 160, balancedWidth: true});
         _.wait(1);
-
         _.clear("width");
     });
 
     // Hard line breaks with \n (style state carries across breaks)
-    const breaks = _.newText({text: "Hard break *demo*:\nfirst line,\n*second styled* line."});
-    _.wait(1);
+    const breaks = _.newText({text: "Hard break *demo*:\nfirst line,\n*second styled* line.", hold: 1});
     _.clear(breaks);
+
+    // Opening and closing symbols are chosen per entry; both can span several characters
+    const style = _.newText({text: "Placeholder _red_ text", hold: 1});
+    _.setText(style, "Placeholder {y yellow} text", {hold: 1});
+    _.setText(style, "Placeholder <<green>> text", {hold: 1});
+    _.clear(style);
+
+    _.newText({text: "Automatic size text", maxWidth: 960, autoSize: true, fontSizeStep: 20, hold: 1});
 }
 
 function testVisual() {
     // Image
-    _.newImage({src: "Images/favicon.png", width: 256, height: 256, duration: 1});
+    _.newImage({src: "favicon", width: 256, height: 256, duration: 1});
     _.wait(1);
 
     // Shapes: one shared group id, self-clearing via duration
-    _.newRect({id: "shape", posX: 0, posY: 0, width: 800, height: 480, color: "#FF6060", duration: 1});
+    _.newRect({id: "shape", posX: 0, posY: 120, width: 800, height: 480, color: "#FF4040"});
+    _.newCircle({id: "shape", posY: -120, diameter: 80});
     _.wait(1);
 
-    _.newCircle({id: "shape", posX: 0, posY: -120, diameter: 40, duration: 1});
+    _.clear("shape");
+
+    _.newLine({id: "shape", posX: 0, posY: 120, scaleX: 480, scaleY: 0, duration: 1});
     _.wait(1);
 
-    _.newLine({id: "shape", posX: 0, posY: 120, lengthX: 480, duration: 1});
-    _.wait(1);
+    const path = _.newLine({id: "shape", posX: 0, posY: 0, positions: [{x: -160, y: -60}, {x: 0, y: 60}, {x: 160, y: -60}], duration: 2});
+    _.animate(path, {scaleY: 1}, 1);
+    _.wait(2);
 
-    _.newLine({id: "shape", posX: 0, posY: 120, lengthY: 120, duration: 1});
-    _.wait(1);
+    // Closed shape: loop strokes back to the first vertex, and an omitted axis defaults to 0
+    _.newLine({id: "shape", positions: [{x: -160, y: 120}, {x: 160, y: 120}, {y: -140}], loop: true, lineWidth: 12, duration: 2});
+    _.wait(2);
 
     // Strokes: strokeColor enables the stroke
-    _.newRect({id: "strokes", posX: -140, posY: 0, width: 240, height: 160, color: "#202040", strokeColor: "#FFE040", strokeWidth: 8, duration: 1});
-    _.newCircle({id: "strokes", posX: 140, posY: 0, diameter: 90, color: "#402060", strokeColor: "#FF6060", strokeWidth: 6, duration: 1});
+    _.newRect({id: "strokes", posX: -200, posY: 0, width: 320, height: 240, color: "#000040", strokeColor: "#FFE040", strokeWidth: 8});
+    _.newCircle({id: "strokes", posX: 200, posY: 0, diameter: 80, color: "#400000", strokeColor: "#FF4040", strokeWidth: 6});
     _.wait(1);
 }
 
@@ -142,29 +187,40 @@ function testAnim() {
     const title = _.newText({text: "Animating text", posY: -200});
     _.wait(0.5);
 
-    _.moveTo(title, {posX: 0, posY: 0}, 1, {easing: "backOut"});
+    _.moveTo(title, {posX: 0, posY: 0}, 1, {easing: "back", direction: "out"});
     _.wait(1);
 
-    _.animate(title, {posX: -300}, 1, {easing: "cubicInOut"});
+    _.animate(title, {posX: -300}, 1, {easing: "cubic", direction: "inOut"});
     _.wait(1);
 
-    _.moveTo(title, {fontSize: 100}, 1, {easing: "quadInOut"});
+    _.moveTo(title, {fontSize: 100}, 1, {easing: "quad", direction: "inOut"});
     _.wait(1);
 
-    _.recolor(title, "#FF6060", 1);
+    _.recolor(title, "#FF4040", 1);
     _.wait(1);
 
-    _.moveTo(title, {posX: 0, posY: -200}, 1, {easing: "quadInOut"});
+    _.moveTo(title, {posX: 0, posY: -200}, 1, {easing: "quad", direction: "inOut"});
     _.wait(1);
 
     _.clear(title, 1);
 
-    // Multi-type scoped defaults: text and circle change and restore together
-    _.withProp({text: {fontSize: 60}, circle: {color: "#FFE040", diameter: 60}}, () => {
-        _.newText({text: "Multi-type scoped defaults.", posY: -160});
-        _.newCircle({posY: 160, duration: 1});
-        _.wait(1);
-    });
+    // Resize: the whole layout scales, so segments and line spacing follow
+    const resizable = _.newText({text: "Resize; this *text*\nand this; line", posY: 200});
+    _.wait(0.5);
+    _.moveTo(resizable, {fontSize: 40}, 1, {easing: "quad", direction: "inOut"});
+    _.wait(1);
+    _.moveTo(resizable, {fontSize: 80}, 1, {easing: "quad", direction: "inOut"});
+    _.wait(1);
+    _.clear(resizable, 1);
+
+    // Opacity is tweenable too: relative dimming, then an absolute target
+    const ghost = _.newText({text: "Tweened opacity", posY: 260});
+    _.wait(0.5);
+    _.animate(ghost, {opacity: -0.5}, 1);
+    _.wait(1);
+    _.moveTo(ghost, {opacity: 1}, 1, {easing: "quad", direction: "inOut"});
+    _.wait(1);
+    _.clear(ghost, 1);
 }
 
 // Scenes: named chapters with recorded boundaries (optional leading pad)
@@ -186,11 +242,14 @@ function testScenes() {
 // seek() jumps the time cursor directly
 // _.seek(_.getDuration() + 1);
 
+// testGlobal();
 // testText();
-// testVisual();
+testVisual();
 // testAnim();
-testScenes();
+// testScenes();
 
 // Render video and audio
+// Or render one chapter only (writes visual_<name>.mp4 / audio_<name>.mp4):
+// renderVideo(CONFIG, import.meta.url, {audio: true, chapter: "intro"});
 const {duration} = await renderVideo(CONFIG, import.meta.url, {audio: true});
 console.log(`Duration: ${duration}s`);

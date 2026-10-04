@@ -1,30 +1,30 @@
 "use strict";
 import {getEasing} from "./easing.js";
 import {getTime, visual} from "./state.js";
-import {requireEvents, toIdSet, validateDuration} from "./validate.js";
+import {matchesIds, requireEvents, toIdArray, validateDuration, validateOpacity} from "./validate.js";
 import {getGroupCenter} from "./visualEvents.js";
 
 // Properties that can be tweened with animate() / moveTo().
 const TWEEN_KEYS = new Set([
     "posX", "posY", "fontSize", "diameter",
-    "width", "height", "lengthX", "lengthY",
-    "lineWidth", "strokeWidth"
+    "width", "height", "scaleX", "scaleY",
+    "lineWidth", "strokeWidth", "opacity"
 ]);
 
-// Latest property tween per (id, key), and per drawable event for colors.
-const tweenChains = new Map();
+// Latest property / color tween per drawable event.
+const propTweens = new WeakMap();
 const colorTweens = new WeakMap();
 
 // Build-time cache of parsed hex colors for recolor().
 const colorCache = new Map();
 
 function resolveEasing(opts) {
-    return getEasing(opts.easing ?? "linear");
+    return getEasing(opts.easing ?? "linear", opts.direction ?? "in");
 }
 
-// Value the current tween chain holds for (id, key) at the time cursor.
-function chainValue(id, key) {
-    const tween = tweenChains.get(id)?.get(key);
+// Value the current tween chain holds for one object on `key` at the time cursor.
+function chainValue(target, key) {
+    const tween = propTweens.get(target)?.get(key);
     if (!tween) return 0;
 
     const span = tween.tweenEnd - tween.start;
@@ -33,46 +33,56 @@ function chainValue(id, key) {
     return tween.from + (tween.to - tween.from) * tween.easing(p);
 }
 
-// Push one tween event per key. A new tween supersedes the previous one for
-// the same (id, key) by closing its window, so chained tweens stay continuous
-// and active windows never overlap.
-function pushTweens(targetId, deltas, duration, easing) {
-    let chain = tweenChains.get(targetId);
-    if (!chain) {
-        chain = new Map();
-        tweenChains.set(targetId, chain);
-    }
-
-    for (const key of Object.keys(deltas)) {
-        const prev = chain.get(key);
-        if (prev) prev.end = getTime();
-
-        const from = chainValue(targetId, key);
-
-        const tween = {
-            type: "tween",
-            targetId,
-            key,
-            from,
-            to: from + deltas[key],
-            start: getTime(),
-            tweenEnd: getTime() + duration,
-            easing
-        };
-
-        chain.set(key, tween);
-        visual.push(tween);
-    }
+// Current tweened offset of one object on a property (used by setText()).
+export function getPropertyOffset(target, key) {
+    return chainValue(target, key);
 }
 
-// Base (pre-tween) value of `key` on the first event with the id that defines it.
-function baseValue(targetId, key) {
-    const event = visual.find((value) => value.id === targetId && value[key] !== undefined);
+// Every drawable event sharing at least one queried id, each included once.
+function matchedObjects(action, id) {
+    requireEvents(action, id);
+    const ids = toIdArray(id);
+    return visual.filter((event) => matchesIds(event, ids));
+}
 
-    if (!event)
-        throw new Error(`moveTo(): no visual events with id ${JSON.stringify(targetId)} define "${key}".`);
+// Push one tween event per (object, key). A new tween supersedes the previous
+// one for the same (object, key) by closing its window, so chained tweens stay
+// continuous and active windows never overlap. `toValue` resolves the absolute
+// end value for one object / key from its current chain value. Objects that do
+// not define the key are skipped (nothing would render them).
+function pushTweens(objects, keys, toValue, duration, easing) {
+    const now = getTime();
 
-    return event[key];
+    for (const key of keys) {
+        for (const target of objects) {
+            if (target[key] === undefined) continue;
+
+            let chain = propTweens.get(target);
+            if (!chain) {
+                chain = new Map();
+                propTweens.set(target, chain);
+            }
+
+            const prev = chain.get(key);
+            if (prev) prev.end = now;
+
+            const from = chainValue(target, key);
+
+            const tween = {
+                type: "tween",
+                target,
+                key,
+                from,
+                to: toValue(target, key, from),
+                start: now,
+                tweenEnd: now + duration,
+                easing
+            };
+
+            chain.set(key, tween);
+            visual.push(tween);
+        }
+    }
 }
 
 function parseColor(color) {
@@ -118,8 +128,9 @@ function colorChainValue(tween, t) {
 
 // ---- Public tween API ----
 
-// Tween relative property deltas on every event with the given id.
-export function animate(id, deltas, duration = 1, opts = {}) {
+// Tween relative property deltas on every object sharing a queried id.
+// Each matching object is affected exactly once; non-sharing objects are ignored.
+export function animate(id, deltas, duration = 0, opts = {}) {
     if (typeof deltas !== "object" || deltas === null || Array.isArray(deltas))
         throw new Error("animate() expects an object of property deltas, e.g. {posX: -200}.");
 
@@ -136,15 +147,14 @@ export function animate(id, deltas, duration = 1, opts = {}) {
             throw new Error(`animate() delta for "${key}" must be a finite number, got ${delta}.`);
     }
 
-    for (const targetId of toIdSet(id)) {
-        requireEvents("animate()", targetId);
-        pushTweens(targetId, deltas, duration, easing);
-    }
+    const objects = matchedObjects("animate()", id);
+    pushTweens(objects, Object.keys(deltas), (target, key, from) => from + deltas[key], duration, easing);
 }
 
 // Set-prop tween: like animate(), but targets are absolute values.
 // posX/posY target the bounding-box center of the group, other keys the final rendered property value.
-export function moveTo(id, targets, duration = 1, opts = {}) {
+// Every object sharing a queried id is affected exactly once; non-sharing objects are ignored.
+export function moveTo(id, targets, duration = 0, opts = {}) {
     if (typeof targets !== "object" || targets === null || Array.isArray(targets))
         throw new Error("moveTo() expects an object of absolute target values, e.g. {posX: -200}.");
 
@@ -157,46 +167,51 @@ export function moveTo(id, targets, duration = 1, opts = {}) {
             throw new Error(`Property "${key}" cannot be tweened with moveTo(). Tweenable properties: ${[...TWEEN_KEYS].join(", ")}.`);
 
         const target = targets[key];
+        // opacity is absolute here, so an out-of-range target is a build-time error.
+        if (key === "opacity") {
+            validateOpacity(target);
+            continue;
+        }
+
         if (typeof target !== "number" || !Number.isFinite(target))
             throw new Error(`moveTo() target for "${key}" must be a finite number, got ${target}.`);
     }
 
-    const ids = toIdSet(id);
+    const ids = toIdArray(id);
+    const objects = matchedObjects("moveTo()", id);
+
+    for (const key of Object.keys(targets)) {
+        if (key !== "posX" && key !== "posY" && !objects.some((target) => target[key] !== undefined))
+            throw new Error(`moveTo(): no visual events with id ${JSON.stringify(id)} define "${key}".`);
+    }
+
     let center = null;
 
-    for (const targetId of ids) {
-        requireEvents("moveTo()", targetId);
-
-        const deltas = {};
-        // Tween chains hold offsets from base values, so the delta to an
-        // absolute target is target minus base minus current offset.
-        for (const key of Object.keys(targets)) {
-            let base;
-            if (key === "posX" || key === "posY") {
-                center ??= getGroupCenter(ids);
-                base = key === "posX" ? center.x : center.y;
-            } else {
-                base = baseValue(targetId, key);
-            }
-
-            deltas[key] = targets[key] - base - chainValue(targetId, key);
+    // Chains hold offsets from base values, so the absolute end value for
+    // posX/posY is target minus the group center; other keys target minus
+    // the object's own base value.
+    pushTweens(objects, Object.keys(targets), (target, key) => {
+        if (key === "posX" || key === "posY") {
+            center ??= getGroupCenter(ids);
+            return targets[key] - (key === "posX" ? center.x : center.y);
         }
 
-        pushTweens(targetId, deltas, duration, easing);
-    }
+        return targets[key] - target[key];
+    }, duration, easing);
 }
 
-// Tween the color of every visual event with the given id to `color`.
-export function recolor(id, color, duration = 1, opts = {}) {
+// Tween the color of every visual event sharing a queried id to `color`.
+// Each matching event is affected exactly once.
+export function recolor(id, color, duration = 0, opts = {}) {
     validateDuration(duration);
 
     const easing = resolveEasing(opts);
     const to = parseColor(color);
-    const ids = toIdSet(id);
+    const ids = toIdArray(id);
 
     let matched = 0;
     visual.forEach((event) => {
-        if (!ids.has(event.id)) return;
+        if (!matchesIds(event, ids)) return;
 
         const base = event.color ?? event.fontColor;
         if (base === undefined) return;

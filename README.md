@@ -24,13 +24,13 @@ import {Engine as _} from "./Engine/engine.js";
 import {record} from "./Engine/record.js";
 import {addSounds} from "./Engine/addSounds.js";
 
-const CONFIG = {WIDTH: 1920, HEIGHT: 1080, FPS: 30};
+const CONFIG = {WIDTH: 1920, HEIGHT: 1080, FPS: 30};  // add SCALE: 2 to record 3840x2160, same framing
 
 _.setBackgroundColor("#000080");
 const title = _.newText({text: "Hello, world!", duration: 2});
 _.wait(2);
 
-_.moveTo(title, {posY: -200}, 1, {easing: "quadOut"});  // tween the text upward
+_.moveTo(title, {posY: -200}, 1, {easing: "quad", direction: "out"});  // tween the text upward
 _.wait(1);
 
 const visual = _.getVisualTimeline();
@@ -47,11 +47,11 @@ Everything is positioned at a monotonically increasing **time cursor**; `_.wait(
 _.wait(2)  // time = 2
 _.newText({...})                 // text event starts at time = 2
 _.wait(1)                        // time = 3
-_.playSound("Sounds/click.wav")  // audio event starts at time = 3
+_.playSound("click")  // audio event starts at time = 3
 _.clear(id)                      // text event ends at time = 3
 ```
 
-Creators return the group id (auto-assigned when `id` is omitted), and a `duration` property ends events on their own - so `wait` + `clear` pairs are optional.
+Creators return the group's ids (a unique id is auto-assigned when `id` is omitted, and `id` accepts an array so one object can carry several ids - every id-taking function then affects it through any of them), and a `duration` property ends events on their own - so `wait` + `clear` pairs are optional. A `hold` property also advances the time cursor after the event spawns (`_.newText({text: "Hi", hold: 2})` is `newText` + `wait(2)`).
 
 **Engine modules are NOT entry points.** Never run `node Engine/record.js` directly - always run an `anim_*.js` script that imports from `Engine/`.
 
@@ -61,13 +61,14 @@ Creators return the group id (auto-assigned when `id` is omitted), and a `durati
 | - | - |
 | `anim_*.js` | Self-contained animation scripts (entry points). `anim_template.js` is the starter template. |
 | `Engine/engine.js` | Public `Engine` facade: all `_.` methods (time cursor, params, audio, queries) |
-| `Engine/state.js` | Global engine state: event arrays, time cursor, auto-id counter, text configs |
+| `Engine/state.js` | Global engine state: event arrays, time cursor, auto-id counter, text configs, asset map |
+| `Engine/assets.js` | Shorthand -> full path map for sounds and images, and the single path resolver used by `record()` / `addSounds()` |
 | `Engine/validate.js` | Shared validation helpers (property types, ids, durations) |
 | `Engine/visualEvents.js` | Table-driven visual event creation (`pushVisual`) and group centering |
 | `Engine/tweens.js` | Property and color tween chains (`animate()`, `moveTo()`, `recolor()`) |
 | `Engine/textEvents.js` | Text event layout and creation (`newText()`) |
 | `Engine/chapters.js` | Chapter/scene markers (`chapter()`, `scene()`, `getChapters()`) |
-| `Engine/param.js` | Default property objects per type (`text`, `line`, `rect`, `circle`, `image`) |
+| `Engine/param.js` | Default property objects per type (`text`, `line`, `rect`, `circle`, `image`) plus shared `global` fallbacks |
 | `Engine/textParser.js` | Text tokenization (markup), width measurement, line wrapping, segment splitting |
 | `Engine/easing.js` | Easing functions for tweens (`linear`, `quad*`, `cubic*`) |
 | `Engine/render.js` | Per-frame Canvas renderer (cached sort + binary search, tween resolution) |

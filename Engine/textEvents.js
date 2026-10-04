@@ -1,8 +1,8 @@
 "use strict";
-import {Param} from "./param.js";
+import {Param, effectiveParam, mergeParam} from "./param.js";
 import {getSegmentsWidth, wrapTextSegments} from "./textParser.js";
-import {getTime, nextAutoId, textProp, visual} from "./state.js";
-import {requireType, resolveDuration} from "./validate.js";
+import {getTime, advanceTime, nextAutoId, textProp, visual} from "./state.js";
+import {normalizeIds, requireType, resolveDuration, validateDuration, validateOpacity} from "./validate.js";
 
 // Accumulated text length across segments; reset per newText() and consumed
 // by onTextSegment callbacks at "wait" markers.
@@ -11,10 +11,14 @@ let textLength = 0;
 function pushTextSegment(prop, seg, posX, posY, end) {
     const event = {
         type: "text",
-        id: prop.id,
+        ids: prop.id,
         text: seg.text,
         posX,
         posY,
+        // Layout anchor: posX/posY are pixel offsets from the text config
+        // anchor, so a tweened font size scales the whole layout about it.
+        anchorX: prop.posX,
+        anchorY: prop.posY,
         fontFamily: prop.fontFamily,
         fontSize: prop.fontSize,
         fontColor: seg.color ?? prop.fontColor,
@@ -23,6 +27,7 @@ function pushTextSegment(prop, seg, posX, posY, end) {
         flashColor: prop.flashColor,
         fadeIn: prop.fadeIn,
         fadeOut: prop.fadeOut,
+        opacity: prop.opacity,
         start: getTime()
     };
 
@@ -47,7 +52,8 @@ function pushTextLine(prop, segments, linePosY, end) {
             const segWidth = segWidths[i];
 
             const segCenterOffset = currWidth + segWidth / 2 - totalWidth / 2;
-            const segPosX = prop.posX + segCenterOffset;
+            // Adjust x-position depending of `prop.alignX`
+            const segPosX = prop.posX + segCenterOffset + totalWidth * prop.alignX / 2;
 
             pushTextSegment(prop, seg, segPosX, linePosY, end);
 
@@ -64,13 +70,13 @@ function pushTextLine(prop, segments, linePosY, end) {
 export function newText(newProp) {
     requireType("text");
 
-    const prop = {...Param.text, ...newProp};
+    const prop = mergeParam("text", newProp);
+    validateOpacity(prop.opacity);
 
     if (typeof prop.text !== "string")
         throw new Error(`Text must be a string, got ${typeof prop.text}.`);
 
-    if (prop.id === undefined || prop.id === null) prop.id = nextAutoId();
-    textProp[prop.id] = prop;
+    prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
     textLength = 0;
 
     const end = resolveDuration(prop.duration);
@@ -78,8 +84,12 @@ export function newText(newProp) {
     // Wrap while preserving style state across line breaks.
     let lines = wrapTextSegments(prop);
 
+    // Cache only after layout succeeds; invalid autoSize settings must not leave text state.
+    for (const idKey of prop.id) textProp[idKey] = prop;
+
     const lineHeight = prop.fontSize;
-    const totalHeight = lines.length * lineHeight;
+    const lineGap = prop.lineGap;
+    const totalHeight = lines.length * lineHeight + Math.max(lines.length - 1, 0) * lineGap;
 
     // Get y-position at the center of the text
     let posY = prop.posY - totalHeight / 2 + lineHeight / 2;
@@ -91,14 +101,19 @@ export function newText(newProp) {
         const lineSegments = lines[i];
         const lineWidth = pushTextLine(prop, lineSegments, posY, end);
         totalWidth = Math.max(totalWidth, lineWidth);
-        posY += lineHeight;
+        posY += lineHeight + lineGap;
     }
 
     prop.onTextSegment(textLength);
     textLength = 0;
 
-    if (prop.autoSetPosX) Param.text.posX += totalWidth;
-    if (prop.autoSetPosY) Param.text.posY += totalHeight;
+    if (prop.autoSetPosX) Param.text.posX = effectiveParam("text", "posX") + totalWidth;
+    if (prop.autoSetPosY) Param.text.posY = effectiveParam("text", "posY") + totalHeight;
+
+    // Strips hold from props; advances the cursor when set.
+    const {hold = 0} = prop;
+    validateDuration(hold);
+    advanceTime(hold);
 
     return prop.id;
 }

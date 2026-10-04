@@ -17,11 +17,14 @@ export function setTime(t) {time = t;}
 
 export function advanceTime(sec) {time += sec;}
 
-// Last merged config per text id, used by setText().
+// Last merged config per text id, used by setText(). Stored under every id the text carries.
 export const textProp = {};
 
 // Chapter/scene markers, mutated in place like visual/audio.
 export const chapters = [];
+
+// Shorthand -> full asset path pairs, set by Engine.setAssets().
+export const assetMap = new Map();
 
 // Auto-assigned group ids are negative, so they never collide with user ids.
 let autoId = -1;

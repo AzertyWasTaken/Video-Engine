@@ -3,6 +3,8 @@ import {execFileSync} from "child_process";
 import fs from "fs";
 import path from "path";
 import {ffmpegPath, resolveCallerPath} from "./utils.js";
+import {resolveAsset} from "./assets.js";
+import {findChapter, chapterFileName} from "./chapters.js";
 
 // If no valid audio events, just remux the video.
 function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
@@ -23,13 +25,13 @@ function remuxVideoWithoutAudio(videoFilePath, outputFilePath) {
 
 // Build filter_complex by creating one delayed stream per *valid* audio event.
 // Use the same `audioEvents` ordering for both: (1) filter input indices and (2) `-i` inputs.
-function buildAudioFilterComplex(audioEvents) {
+function buildAudioFilterComplex(audioEvents, startOffset) {
     const filterPartStrings = [];
     const mixInputLabels = [];
 
     for (let i = 0; i < audioEvents.length; i++) {
         const audioEvent = audioEvents[i];
-        const startDelayMs = Math.max(0, Math.floor((audioEvent.start ?? 0) * 1000));
+        const startDelayMs = Math.max(0, Math.floor(((audioEvent.start ?? 0) - startOffset) * 1000));
 
         // Inputs: 0 = video, then 1..N = each audio file (same audioEvents index order)
         const audioInputIndex = i + 1;
@@ -60,7 +62,9 @@ function buildAmixFilter(mixInputLabels, videoDuration) {
     return `${amixBase}[audio]`;
 }
 
-function resolveSoundFilePath(soundName) {
+// `sound` is stored as written: a registered shorthand, an absolute path, or a
+// path relative to the calling script, so all three resolve here.
+function resolveSoundFilePath(soundName, baseDir) {
     if (typeof soundName !== "string") {
         throw new TypeError(
             `addSounds.js: Invalid sound value - expected a string, got ${typeof soundName}. ` +
@@ -68,15 +72,15 @@ function resolveSoundFilePath(soundName) {
         );
     }
 
-    return soundName;
+    return resolveAsset(soundName, baseDir);
 }
 
-function appendAudioInputArgs(ffmpegArgs, audioEvents) {
+function appendAudioInputArgs(ffmpegArgs, audioEvents, baseDir) {
     // Add one -i per audio event that has a sound path (same ordering as `audioEvents` above).
     for (const audioEvent of audioEvents) {
-        // Resolve relative to this script so execution cwd doesn't matter.
+        // Resolve shorthands and relative paths against this script so execution cwd doesn't matter.
         const soundName = audioEvent.sound;
-        const resolvedSoundPath = resolveSoundFilePath(soundName);
+        const resolvedSoundPath = resolveSoundFilePath(soundName, baseDir);
 
         if (!fs.existsSync(resolvedSoundPath)) {
             throw new Error(
@@ -100,25 +104,39 @@ function appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath) {
     );
 }
 
-export function addSounds(rawAudioEvents, videoDuration, callerFilePath) {
+export function addSounds(rawAudioEvents, videoDuration, callerFilePath, opts = {}) {
     const resolvedPath = resolveCallerPath(callerFilePath);
     const videoDirectory = path.dirname(resolvedPath);
-    const videoFilePath = path.join(videoDirectory, "visual.mp4");
-    const outputFilePath = path.join(videoDirectory, "audio.mp4");
+    let videoFilePath = path.join(videoDirectory, "visual.mp4");
+    let outputFilePath = path.join(videoDirectory, "audio.mp4");
 
-    const audioEvents = Array.isArray(rawAudioEvents)
+    let start = 0;
+    let end = videoDuration;
+    if (opts.chapter !== undefined) {
+        const chapter = findChapter(opts.chapter, videoDuration);
+        start = chapter.start;
+        end = chapter.end;
+        videoFilePath = path.join(videoDirectory, chapterFileName("visual_", chapter.name));
+        outputFilePath = path.join(videoDirectory, chapterFileName("audio_", chapter.name));
+    }
+
+    let audioEvents = Array.isArray(rawAudioEvents)
     ? rawAudioEvents.filter(event => event && event.sound) : [];
+
+    // Chapter clips keep sounds that start inside the window, shifted to it.
+    if (opts.chapter !== undefined)
+        audioEvents = audioEvents.filter(event => (event.start ?? 0) >= start && (event.start ?? 0) < end);
 
     if (audioEvents.length === 0)
         return remuxVideoWithoutAudio(videoFilePath, outputFilePath);
 
-    const [filterPartStrings, mixInputLabels] = buildAudioFilterComplex(audioEvents);
+    const [filterPartStrings, mixInputLabels] = buildAudioFilterComplex(audioEvents, start);
 
-    const amixFilter = buildAmixFilter(mixInputLabels, videoDuration);
+    const amixFilter = buildAmixFilter(mixInputLabels, end - start);
     const filterComplex = [filterPartStrings.join(";"), amixFilter].filter(Boolean).join(";");
 
     const ffmpegArgs = ["-y", "-i", videoFilePath];
-    appendAudioInputArgs(ffmpegArgs, audioEvents);
+    appendAudioInputArgs(ffmpegArgs, audioEvents, videoDirectory);
     appendOutputArgs(ffmpegArgs, filterComplex, outputFilePath);
 
     console.log("Processing...");

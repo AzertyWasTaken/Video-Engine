@@ -1,7 +1,7 @@
 "use strict";
 import {Canvas, loadImage} from "skia-canvas";
 
-let canvas, width, height;
+let canvas, width, height, pixelWidth, pixelHeight;
 const imageCache = new Map();
 
 // Cache for sorted events to avoid re-sorting every frame.
@@ -12,15 +12,31 @@ let cachedVisualLength = -1;
 let cachedSortedEvents = null;
 
 // Reused per-frame tween buffers (cleared at the start of every frame).
-const tweenOffsets = new Map(); // targetId -> {key: offset value}
+const tweenOffsets = new Map(); // target event -> {key: offset value}
 const tweenColors = new Map();  // drawable event -> css color string
 
-export function setCanvas(WIDTH, HEIGHT) {
-    canvas = new Canvas(WIDTH, HEIGHT);
+// `WIDTH`/`HEIGHT` are the logical design space every event is positioned in,
+// while the canvas (and the encoded video) is `SCALE` times larger in pixels.
+// The context transform maps the logical space onto the larger buffer, so a
+// bigger SCALE only sharpens the output - nothing moves.
+export function setCanvas(WIDTH, HEIGHT, SCALE = 1) {
+    pixelWidth = Math.round(WIDTH * SCALE);
+    pixelHeight = Math.round(HEIGHT * SCALE);
+
+    canvas = new Canvas(pixelWidth, pixelHeight);
     canvas.gpu = true;
     width = WIDTH;
     height = HEIGHT;
+
+    // Derived from the rounded pixel size, not from SCALE, so a fractional
+    // SCALE (1.5) still tiles the logical frame onto the buffer exactly.
+    // The transform persists across frames, so it is set once here.
+    canvas.getContext("2d").setTransform(pixelWidth / WIDTH, 0, 0, pixelHeight / HEIGHT, 0, 0);
 }
+
+// Encoded resolution in pixels - what FFmpeg's -video_size and the frame
+// readback must use (they work in device pixels, unaffected by the transform).
+export function getPixelSize() {return {WIDTH: pixelWidth, HEIGHT: pixelHeight};}
 
 // Sort events by start time once, cache the result.
 // Invalidated automatically when the visual array reference or length changes.
@@ -65,8 +81,8 @@ function pushRelevantObjects(objects, t, visual) {
 }
 
 // Collect active tween contributions into the reused per-frame maps.
-// Tween events carry either a property delta (targetId + key) or a color
-// override (a direct reference to one drawable event).
+// Tween events carry either a property override (target + key) or a color
+// override (target + color), both addressing one drawable event.
 function collectTweens(objects, t) {
     tweenOffsets.clear();
     tweenColors.clear();
@@ -88,24 +104,29 @@ function collectTweens(objects, t) {
         } else {
             const value = obj.from + (obj.to - obj.from) * e;
 
-            let entry = tweenOffsets.get(obj.targetId);
+            let entry = tweenOffsets.get(obj.target);
             if (entry === undefined) {
                 entry = {};
-                tweenOffsets.set(obj.targetId, entry);
+                tweenOffsets.set(obj.target, entry);
             }
             entry[obj.key] = value;
         }
     }
 }
 
-function getTextOpacity(obj, t) {
+// Object opacity: base value plus its tween offset, clamped to 0..1 and scaled
+// by fade progress. The clamp is required: `globalAlpha` ignores out-of-range
+// values, so an overshooting easing would otherwise leak the previous alpha.
+function getObjectOpacity(obj, t, tweenOpacity) {
     const opacityIn = obj.fadeIn <= 0 ? 1
     : Math.min((t - (obj.start ?? 0)) / obj.fadeIn, 1);
 
     const opacityOut = obj.fadeOut <= 0 ? 1
     : Math.min(((obj.end ?? Infinity) - t) / obj.fadeOut, 1);
 
-    return Math.min(opacityIn, opacityOut);
+    const base = Math.min(Math.max(obj.opacity + tweenOpacity, 0), 1);
+
+    return base * Math.min(opacityIn, opacityOut);
 }
 
 export function render(visual, t) {
@@ -164,15 +185,16 @@ export function render(visual, t) {
     collectTweens(objects, t);
 
     for (const obj of objects) {
-        if (obj.type === "tween") continue;
+        if (obj.type === "tween" || obj.type === "background") continue;
 
-        // Compute opacity for fadeIn / fadeOut
-        const opacity = getTextOpacity(obj, t);
+        // Tween offsets apply per object (one entry per tweened property)
+        const tw = tweenOffsets.get(obj);
+
+        // Combine the object's base opacity with its fadeIn / fadeOut progress.
+        const opacity = getObjectOpacity(obj, t, tw?.opacity ?? 0);
         if (opacity <= 0) continue;
         ctx.globalAlpha = opacity;
 
-        // Tween offsets apply to the object's whole id group
-        const tw = tweenOffsets.get(obj.id);
         const posX = width / 2 + obj.posX + (tw?.posX ?? 0);
         const posY = height / 2 + obj.posY + (tw?.posY ?? 0);
         const colorOverride = tweenColors.get(obj);
@@ -187,8 +209,20 @@ export function render(visual, t) {
             }
 
             const fontSize = obj.fontSize + (tw?.fontSize ?? 0);
+            let textX = posX;
+            let textY = posY;
+
+            // Segment offsets and line spacing are baked in pixels at build
+            // time, so a tweened font size scales the whole layout about the
+            // text anchor instead of leaving segments at their old spacing.
+            if (obj.fontSize > 0 && fontSize !== obj.fontSize) {
+                const scale = fontSize / obj.fontSize;
+                textX = width / 2 + obj.anchorX + (obj.posX - obj.anchorX) * scale + (tw?.posX ?? 0);
+                textY = height / 2 + obj.anchorY + (obj.posY - obj.anchorY) * scale + (tw?.posY ?? 0);
+            }
+
             ctx.font = `${obj.fontWeight} ${fontSize}px ${obj.fontFamily}`;
-            ctx.fillText(obj.text, posX, posY);
+            ctx.fillText(obj.text, textX, textY);
         }
         else if (obj.type === "rect") {
             const rectWidth = obj.width + (tw?.width ?? 0);
@@ -224,14 +258,21 @@ export function render(visual, t) {
             }
         }
         else if (obj.type === "line") {
-            ctx.beginPath();
-            const lengthX = obj.lengthX + (tw?.lengthX ?? 0);
-            const lengthY = obj.lengthY + (tw?.lengthY ?? 0);
-            ctx.moveTo(posX - lengthX / 2, posY - lengthY / 2);
-            ctx.lineTo(posX + lengthX / 2, posY + lengthY / 2);
-            ctx.lineWidth = obj.lineWidth + (tw?.lineWidth ?? 0);
-            ctx.strokeStyle = colorOverride ?? obj.color;
-            ctx.stroke();
+            const positions = obj.positions;
+            if (positions.length >= 2) {
+                const scaleX = obj.scaleX + (tw?.scaleX ?? 0);
+                const scaleY = obj.scaleY + (tw?.scaleY ?? 0);
+
+                ctx.beginPath();
+                ctx.moveTo(posX + positions[0].x * scaleX, posY + positions[0].y * scaleY);
+                for (let i = 1; i < positions.length; i++)
+                    ctx.lineTo(posX + positions[i].x * scaleX, posY + positions[i].y * scaleY);
+                // loop closes the path: one extra segment back to the first vertex
+                if (obj.loop) ctx.closePath();
+                ctx.lineWidth = obj.lineWidth + (tw?.lineWidth ?? 0);
+                ctx.strokeStyle = colorOverride ?? obj.color;
+                ctx.stroke();
+            }
         }
         else if (obj.type === "image") {
             const img = imageCache.get(obj.src);

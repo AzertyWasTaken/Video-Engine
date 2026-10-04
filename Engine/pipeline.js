@@ -12,18 +12,18 @@ export async function renderVideo(CONFIG, callerPath, opts = {}) {
     if (!CONFIG || typeof CONFIG !== "object")
         throw new Error("renderVideo() expects CONFIG {WIDTH, HEIGHT, FPS}.");
 
-    const {WIDTH, HEIGHT, FPS} = CONFIG;
-    for (const [key, value] of [["WIDTH", WIDTH], ["HEIGHT", HEIGHT], ["FPS", FPS]]) {
+    const {WIDTH, HEIGHT, FPS, SCALE = 1} = CONFIG;
+    for (const [key, value] of [["WIDTH", WIDTH], ["HEIGHT", HEIGHT], ["FPS", FPS], ["SCALE", SCALE]]) {
         if (typeof value !== "number" || !Number.isFinite(value) || value <= 0)
             throw new Error(`renderVideo() expects positive finite CONFIG.${key}, got ${value}.`);
     }
 
     const duration = getTime();
-    const visualPath = await record(CONFIG, visual, duration, callerPath);
+    const visualPath = await record(CONFIG, visual, duration, callerPath, opts);
 
     let audioResult = null;
     if (opts.audio === true)
-        audioResult = addSounds(audio, duration, callerPath);
+        audioResult = addSounds(audio, duration, callerPath, opts);
 
     return {visualPath, audioResult, duration};
 }

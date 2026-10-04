@@ -45,3 +45,20 @@ export function runScene(name, fn, opts = {}) {
 }
 
 export function getChapters() {return chapters;}
+
+// Find a chapter by name; an open end (null) resolves to the total duration.
+export function findChapter(name, duration) {
+    const chapter = chapters.find((chapter) => chapter.name === name);
+    if (!chapter) {
+        const names = chapters.map((chapter) => JSON.stringify(chapter.name)).join(", ") || "none";
+        throw new Error(`Unknown chapter ${JSON.stringify(name)}. Known chapters: ${names}.`);
+    }
+
+    return {name: chapter.name, start: chapter.start, end: chapter.end ?? duration};
+}
+
+// Filesystem-safe output file name for a chapter (names may contain spaces or ":").
+export function chapterFileName(prefix, name) {
+    const safe = name.replace(/[^\w-]+/g, "-").replace(/^-+|-+$/g, "");
+    return `${prefix}${safe || "chapter"}.mp4`;
+}

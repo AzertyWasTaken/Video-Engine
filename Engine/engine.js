@@ -1,19 +1,15 @@
 "use strict";
-import path from "path";
-import {Param} from "./param.js";
-import {advanceTime, audio, chapters, getTime, setTime, textProp, visual} from "./state.js";
-import {resolveDuration, resolvePropEntries, requireType, toIdSet, validateDuration} from "./validate.js";
+import {Param, effectiveParam} from "./param.js";
+import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId} from "./state.js";
+import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateOpacity} from "./validate.js";
+import {setAssets as setAssetMap, getAssets as getAssetMap} from "./assets.js";
 import {getGroupCenter, pushVisual as pushVisualEvent} from "./visualEvents.js";
 import {addChapter as pushChapter, runScene as runSceneEvent} from "./chapters.js";
-import {animate as applyAnimate, moveTo as applyMoveTo, recolor as applyRecolor} from "./tweens.js";
+import {animate as applyAnimate, moveTo as applyMoveTo, recolor as applyRecolor, getPropertyOffset} from "./tweens.js";
 import {newText as createText} from "./textEvents.js";
 
 // Per-type checkpoint stacks for saveParam() / undoParam().
 const propCheckpoints = new Map();
-
-// Sound paths are joined against this base.
-// Null means resolve against the current working directory; setAudioFile() overrides it.
-let audioFile = null;
 
 // Public API facade. Timeline and event logic lives in the dedicated modules;
 // this object defines the full method surface used by animation scripts.
@@ -102,13 +98,16 @@ export const Engine = {
 
     getProp(key, type = "text") {
         requireType(type);
-        return Param[type][key];
+        return effectiveParam(type, key);
     },
 
     setProp(newProp, type = "text") {
         requireType(type);
 
         for (const key in newProp) {
+            if (key === "opacity" && (type === "global" || newProp[key] !== undefined))
+                validateOpacity(newProp[key]);
+
             Param[type][key] = newProp[key];
         }
     },
@@ -117,18 +116,24 @@ export const Engine = {
         requireType(type);
 
         for (const key in newProp) {
-            const keyA = Param[type][key];
+            const keyA = effectiveParam(type, key);
             const keyB = newProp[key];
 
             if (!isFinite(keyA) || !isFinite(keyB))
                 throw new Error(`Nonnumber values are not accepted: ${keyA}, ${keyB}`);
 
-            Param[type][key] += keyB;
+            const value = keyA + keyB;
+            if (key === "opacity") validateOpacity(value);
+
+            Param[type][key] = value;
         }
     },
 
     // ---- Audio ----
 
+    // Sound and image paths are stored as written: a registered shorthand, an
+    // absolute path, or a path relative to the calling script. record() and
+    // addSounds() resolve them once, after the timeline is built.
     playSound(filePath, volume) {
         if (typeof filePath !== "string" || filePath.length === 0)
             throw new Error(`playSound() expects a non-empty file path string, got ${JSON.stringify(filePath)}.`);
@@ -140,18 +145,21 @@ export const Engine = {
         )
         throw new Error(`playSound() expects a non-negative finite volume, got ${volume}.`);
 
-        const sound = path.isAbsolute(filePath) || !audioFile
-        ? filePath
-        : path.join(audioFile, filePath);
-
         audio.push({
-            sound,
+            sound: filePath,
             volume: volume ?? 1,
             start: getTime()
         });
     },
 
-    setAudioFile(filePath) {audioFile = filePath;},
+    // ---- Assets ----
+
+    // Register shorthand -> full path pairs, e.g. {click: "./Sounds/click.wav"}.
+    // Both sounds and images resolve through this map, so a timeline keeps the
+    // short names instead of resolved full paths.
+    setAssets(newMap) {setAssetMap(newMap);},
+
+    getAssets() {return getAssetMap();},
 
     // ---- Event creation ----
 
@@ -195,18 +203,20 @@ export const Engine = {
 
     // ---- Tweens ----
 
-    animate(id, deltas, duration = 1, opts = {}) {return applyAnimate(id, deltas, duration, opts);},
+    animate(id, deltas, duration = 0, opts = {}) {return applyAnimate(id, deltas, duration, opts);},
 
-    moveTo(id, targets, duration = 1, opts = {}) {return applyMoveTo(id, targets, duration, opts);},
+    moveTo(id, targets, duration = 0, opts = {}) {return applyMoveTo(id, targets, duration, opts);},
 
-    recolor(id, color, duration = 1, opts = {}) {return applyRecolor(id, color, duration, opts);},
+    recolor(id, color, duration = 0, opts = {}) {return applyRecolor(id, color, duration, opts);},
 
     // ---- Text updates ----
 
     // Replace text of an existing id with a crossfade.
     // opts.fade crossfades old out / new in; opts.hold advances the cursor afterwards.
     setText(id, text, opts = {}) {
-        if (!textProp[id])
+        const ids = toIdArray(id);
+        const stored = ids.map((idKey) => textProp[idKey]).find((entry) => entry !== undefined);
+        if (!stored)
             throw new Error(`No text found with id ${JSON.stringify(id)} - call newText() with this id before setText().`);
 
         if (typeof opts !== "object" || opts === null)
@@ -216,43 +226,71 @@ export const Engine = {
         validateDuration(fade);
         validateDuration(hold);
 
+        // Tween events target the old segment events, so bake their current
+        // offsets into the replacement props - otherwise the new text snaps
+        // back to its pre-tween position.
+        const source = visual.find((value) => value.type === "text" && matchesIds(value, ids));
+        const baked = {};
+        if (source) {
+            for (const key of ["posX", "posY", "fontSize", "opacity"]) {
+                const offset = getPropertyOffset(source, key);
+                if (offset === 0) continue;
+
+                const value = stored[key] + offset;
+                // opacity is bounded, and an offset can push the baked value out of range.
+                baked[key] = key === "opacity" ? Math.min(Math.max(value, 0), 1) : value;
+            }
+        }
+
         Engine.clear(id, fade);
         advanceTime(-fade);
 
         Engine.newText({
-            ...textProp[id],
+            ...stored,
+            ...baked,
             text,
             flashDuration: 0,
             autoSetPosX: false,
             autoSetPosY: false,
             fadeIn: fade,
+            hold
         });
 
-        advanceTime(fade + hold);
+        advanceTime(fade);
     },
 
     centerText(id, posX = null, posY = null) {
-        const ids = toIdSet(id);
+        const ids = toIdArray(id);
 
-        if (!visual.some((value) => ids.has(value.id)))
-            throw new Error(`centerText(): no visual events with id ${JSON.stringify(id)}.`);
+        if (!visual.some((value) => matchesIds(value, ids))) return;
 
         const center = getGroupCenter(ids);
 
         visual.forEach((value) => {
-            if (ids.has(value.id)) {
-                if (posX !== null) value.posX += posX - center.x;
-                if (posY !== null) value.posY += posY - center.y;
+            if (matchesIds(value, ids)) {
+                if (posX !== null) {
+                    const deltaX = posX - center.x;
+                    value.posX += deltaX;
+                    // Text keeps its layout anchor on the group, so a later
+                    // fontSize tween scales about the moved position.
+                    if (value.anchorX !== undefined) value.anchorX += deltaX;
+                }
+
+                if (posY !== null) {
+                    const deltaY = posY - center.y;
+                    value.posY += deltaY;
+                    if (value.anchorY !== undefined) value.anchorY += deltaY;
+                }
             }
         });
     },
 
     clear(id, fading) {
-        const ids = toIdSet(id);
+        const ids = toIdArray(id);
         const now = getTime();
 
         visual.forEach((value) => {
-            if (ids.has(value.id)) {
+            if (matchesIds(value, ids)) {
                 if (value.end === undefined || value.end > now) value.end = now;
                 if (typeof fading === "number") value.fadeOut = fading;
             }
@@ -262,13 +300,20 @@ export const Engine = {
     // ---- Queries ----
 
     getEvents(id) {
-        const ids = toIdSet(id);
-        return visual.filter((value) => ids.has(value.id));
+        const ids = toIdArray(id);
+        return visual.filter((value) => matchesIds(value, ids));
+    },
+
+    getSize(id) {
+        const ids = toIdArray(id);
+        return getGroupCenter(ids);
     },
 
     getVisualTimeline() {return visual;},
 
     getAudioTimeline() {return audio;},
 
-    getDuration() {return getTime();}
+    getDuration() {return getTime();},
+
+    getNextId() {return nextAutoId();}
 };

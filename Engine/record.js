@@ -1,15 +1,19 @@
 "use strict";
 import path from "path";
 import {spawn} from "child_process";
-import {render, setCanvas, loadImageAsset} from "./render.js";
+import {render, setCanvas, getPixelSize, loadImageAsset} from "./render.js";
 import {ffmpegPath, resolveCallerPath} from "./utils.js";
+import {resolveAsset} from "./assets.js";
+import {findChapter, chapterFileName} from "./chapters.js";
 
-function getFFMPEG(CONFIG, outputFile) {
+// `pixelWIDTH`/`pixelHEIGHT` are the encoded resolution: FFmpeg's -video_size
+// and the frame readback both work in device pixels, not the logical design space.
+function getFFMPEG(CONFIG, pixelWIDTH, pixelHEIGHT, outputFile) {
     return spawn(ffmpegPath, [
         "-y",
         "-f", "rawvideo",
         "-pixel_format", "rgba",
-        "-video_size", `${CONFIG.WIDTH}x${CONFIG.HEIGHT}`,
+        "-video_size", `${pixelWIDTH}x${pixelHEIGHT}`,
         "-r", String(CONFIG.FPS),
         "-i", "-",
         "-c:v", "libx264",
@@ -20,25 +24,47 @@ function getFFMPEG(CONFIG, outputFile) {
     ]);
 }
 
-export async function record(CONFIG, visual, duration, callerPath) {
-    const {FPS, WIDTH, HEIGHT} = CONFIG;
+export async function record(CONFIG, visual, duration, callerPath, opts = {}) {
+    const {WIDTH, HEIGHT, FPS, SCALE = 1} = CONFIG;
 
     const resolvedPath = resolveCallerPath(callerPath);
     const videoDir = path.dirname(resolvedPath);
-    const outputFile = path.join(videoDir, "visual.mp4");
+    let outputFile = path.join(videoDir, "visual.mp4");
 
-    const totalFrames = Math.ceil(FPS * duration);
+    // Optional chapter window: render only the frames between its boundaries.
+    let start = 0;
+    let end = duration;
+    if (opts.chapter !== undefined) {
+        const chapter = findChapter(opts.chapter, duration);
+        if (chapter.end <= chapter.start)
+            throw new Error(`Chapter ${JSON.stringify(chapter.name)} has no length (start ${chapter.start}, end ${chapter.end}).`);
+        start = chapter.start;
+        end = chapter.end;
+        outputFile = path.join(videoDir, chapterFileName("visual_", chapter.name));
+    }
 
-    const ffmpeg = getFFMPEG(CONFIG, outputFile);
-    setCanvas(WIDTH, HEIGHT);
+    const totalFrames = Math.ceil(FPS * (end - start));
 
-    // Preload any image assets referenced in the visual timeline.
-    // Resolve relative paths against the script directory (like sounds).
-    const imageEvents = visual.filter(obj => obj.type === "image");
+    // SCALE raises the encoded resolution only; the events keep their logical
+    // WIDTH x HEIGHT coordinates, so the framing is identical.
+    setCanvas(WIDTH, HEIGHT, SCALE);
+    const pixel = getPixelSize();
+
+    const ffmpeg = getFFMPEG(CONFIG, pixel.WIDTH, pixel.HEIGHT, outputFile);
+
+    // Preload image assets active in the recorded window.
+    // `src` is stored as written: a registered shorthand or a path relative to
+    // the script directory, so both resolve here.
+    const imageEvents = visual.filter(obj => obj.type === "image"
+        && obj.start < end && (obj.end ?? Infinity) > start);
 
     for (const img of imageEvents) {
-        const resolvedSrc = path.isAbsolute(img.src)
-        ? img.src : path.join(videoDir, img.src);
+        if (!img.src) {
+            console.warn(`Skipping image event with an empty src (id ${JSON.stringify(img.ids)}).`);
+            continue;
+        }
+
+        const resolvedSrc = resolveAsset(img.src, videoDir);
 
         try {
             // Cache under the original src so render.js can look it up
@@ -50,10 +76,10 @@ export async function record(CONFIG, visual, duration, callerPath) {
     }
 
     for (let f = 0; f < totalFrames; f++) {
-        const t = f / FPS;
+        const t = start + f / FPS;
 
         const canvas = render(visual, t);
-        const frame = canvas.getContext("2d").getImageData(0, 0, WIDTH, HEIGHT);
+        const frame = canvas.getContext("2d").getImageData(0, 0, pixel.WIDTH, pixel.HEIGHT);
         const buffer = Buffer.from(frame.data.buffer);
 
         if (!ffmpeg.stdin.write(buffer)) {

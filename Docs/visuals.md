@@ -4,16 +4,18 @@
 
 Visuals are created with `_.newLine()`, `_.newCircle()`, `_.newRect()`, `_.newImage()`, and `_.setBackgroundColor()`. Defaults for each type live in `Engine/param.js` and can be changed via `_.setProp(newProp, type)`.
 
-## Common properties (all creators)
+## Common properties (object creators)
 
-Every visual creator accepts these properties and **returns the group id**:
+Every object creator (`_.newText()`, `_.newLine()`, `_.newCircle()`, `_.newRect()`, and `_.newImage()`) accepts these properties and **returns the group's ids (array)**. Their defaults live in the shared `global` section of `Engine/param.js` - change them for all unset types at once with `_.setProp(props, "global")`. Background events are documented separately below.
 
 | Property | Default | Description |
 | - | - | - |
-| `id` | auto | Integer or string group identifier; a unique negative id is auto-assigned when omitted |
+| `id` | auto | Id or array of ids (string or finite number); the object is affected by any id it carries. A unique negative id is auto-assigned when omitted |
 | `duration` | `null` | Seconds until the event auto-ends; `null` keeps it visible until `_.clear()` |
 | `posX`, `posY` | `0` | Offset from canvas center |
+| `alignX`, `alignY` | `0` | Alignment relative to `posX`/`posY`: `-1` left/top, `0` center, `1` right/bottom - the element sits on that side of the anchor (its opposite edge lands on `posX`/`posY`) |
 | `fadeIn`, `fadeOut` | `0` | Fade-in / fade-out durations (seconds) |
+| `opacity` | `1` | Base opacity from `0` (invisible) to `1` (opaque); multiplied by fade progress; tweenable |
 
 The tables below list the type-specific properties. See [engine-api.md](./engine-api.md#animation) for animating these properties over time.
 
@@ -21,9 +23,11 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 
 | Property | Default | Description |
 | - | - | - |
-| `lengthX` | `0` | Horizontal vector component from center |
-| `lengthY` | `0` | Vertical vector component from center |
+| `positions` | `[]` | Array of vertex objects, each relative to `posX`/`posY`; consecutive vertices form the polyline segments (fewer than 2 draws nothing). **Each axis is optional and defaults to `0`**, so `{x: 120}` and `{y: -60}` are valid vertices |
+| `scaleX` | `1` | Horizontal multiplier applied to every vertex offset (`lineWidth` is unaffected); tweenable |
+| `scaleY` | `1` | Vertical multiplier applied to every vertex offset; tweenable |
 | `lineWidth` | `16` | Stroke width in pixels |
+| `loop` | `false` | Close the path: strokes one extra segment from the last vertex back to the first. Needs at least 3 `positions` - a build-time error is thrown otherwise |
 | `color` | `"#FFFFFF"` | Line color (any CSS color string) |
 
 ## Rectangle properties (`type: "rect"`)
@@ -51,11 +55,11 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 
 | Property | Default | Description |
 | - | - | - |
-| `src` | `""` | Image source path (relative to the calling script's directory, or absolute) |
+| `src` | `""` | Image source: a shorthand registered with `_.setAssets()`, an absolute path, or a path relative to the calling script's directory |
 | `width` | `256` | Rendered width in pixels |
 | `height` | `256` | Rendered height in pixels |
 
-Images are preloaded by `record()` before the first frame; relative paths resolve against the calling script's directory. Failed loads log a console warning and the image is skipped during rendering.
+Images are preloaded by `record()` before the first frame; each `src` is resolved through the shorthand map set by `_.setAssets()` (see [engine-api.md](./engine-api.md#sound--assets)), falling back to the calling script's directory for plain relative paths. Failed loads log a console warning and the image is skipped during rendering; an empty `src` is skipped with a warning.
 
 ## Visual element types
 
@@ -64,28 +68,29 @@ All events pushed to the visual timeline share this structure (`start` is set to
 | `type` | Fields | Description |
 | - | - | - |
 | `"background"` | `color`, `start`, `fadeIn`, `fadeOut`, `end?` | Fills the canvas; the most recent background with `start <= t < end` wins (default `#000000`) |
-| `"text"` | `id`, `text`, `posX`, `posY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `flashDuration`, `flashColor`, `fadeIn`, `fadeOut`, `start`, `end?` | Rendered text segment |
-| `"circle"` | `id`, `posX`, `posY`, `diameter`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `start`, `end?` | Filled circle (optional stroke) |
-| `"rect"` | `id`, `posX`, `posY`, `width`, `height`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `start`, `end?` | Filled rectangle (optional stroke) |
-| `"line"` | `id`, `posX`, `posY`, `lengthX`, `lengthY`, `lineWidth`, `color`, `fadeIn`, `fadeOut`, `start`, `end?` | Stroked line |
-| `"image"` | `id`, `src`, `posX`, `posY`, `width`, `height`, `fadeIn`, `fadeOut`, `start`, `end?` | Image overlay |
-| `"tween"` | `targetId`/`target`, `key`/`color`, `from`, `to`, `start`, `tweenEnd`, `easing`, `end?` | Animation event; resolved by the renderer, never drawn |
+| `"text"` | `ids`, `text`, `posX`, `posY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `flashDuration`, `flashColor`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Rendered text segment |
+| `"circle"` | `ids`, `posX`, `posY`, `diameter`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Filled circle (optional stroke) |
+| `"rect"` | `ids`, `posX`, `posY`, `width`, `height`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Filled rectangle (optional stroke) |
+| `"line"` | `ids`, `posX`, `posY`, `positions`, `scaleX`, `scaleY`, `lineWidth`, `loop`, `color`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Stroked polyline (closed when `loop` is set) |
+| `"image"` | `ids`, `src`, `posX`, `posY`, `width`, `height`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Image overlay |
+| `"tween"` | `target`, `key`/`color`, `from`, `to`, `start`, `tweenEnd`, `easing`, `end?` | Animation event; resolved by the renderer, never drawn |
 
 ## Rendering geometry
 
 - **Text** - centered at `(width / 2 + posX, height / 2 + posY)`
 - **Rect** - top-left corner at `(width - w) / 2 + posX, (height - h) / 2 + posY`
 - **Circle** - arc centered at `(width / 2 + posX, height / 2 + posY)` (see the note above)
-- **Line** - from `(posX - lengthX / 2, posY - lengthY / 2)` to `(posX + lengthX / 2, posY + lengthY / 2)`, stroked with `lineWidth`
+- **Line** - path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex `{x, y}` in `positions` (an omitted axis is `0`), stroked with `lineWidth`; `loop` closes the path back to the first vertex, which stays inside the vertex bounding box so alignment and centering are unaffected
 - **Image** - top-left corner like rect, drawn from the image cache keyed on the original `src`
+- **Alignment** - `alignX`/`alignY` shift the element by half its bounding box to that side of the anchor: text lines shift by half the line width, the text block by half its total height, shapes by half their `width`/`height` or `diameter`, lines by their scaled vertex box plus `lineWidth`
 
 ## Grouping & centering
 
-`_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events with a matching id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id or a `Set` of ids. Works for text, rects, circles, lines, and images.
+`_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events sharing a queried id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id or an array of ids; each call affects every matching object exactly once. Works for text, rects, circles, lines, and images.
 
-Per-type bounding-box size: text uses its measured width and `fontSize`; circle uses `diameter`; line uses `length + lineWidth`; image and rect use `width`/`height`.
+Per-type bounding-box size: text uses its measured width and `fontSize`; circle uses `diameter`; line uses its scaled vertex extents plus `lineWidth`; image and rect use `width`/`height`.
 
-`_.getEvents(id)` returns the visual events with a matching id (excluding tween events) for inspection.
+`_.getEvents(id)` returns the visual events sharing a queried id (excluding tween events) for inspection.
 
 For animating groups over time (`animate`, `moveTo`, `recolor`), see [engine-api.md](./engine-api.md#animation).
 
