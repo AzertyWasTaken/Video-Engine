@@ -10,7 +10,7 @@ For default-property helpers (`setProp`, `changeProp`, checkpoints), see [engine
 
 ## Text configuration properties
 
-Properties passed directly to `_.newText({...})` are merged on top of the persistent defaults set by `_.setProp()`; `id`, `posX`, `posY`, `alignX`, `alignY`, `fadeIn`, `fadeOut`, `opacity`, and `duration` fall back to the shared `global` defaults while undefined.
+Properties passed directly to `_.newText({...})` are merged on top of the persistent defaults set by `_.setProp()`; `id`, `posX`, `posY`, `alignX`, `alignY`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, and `duration` fall back to the shared `global` defaults while undefined.
 
 | Property | Default | Description |
 | - | - | - |
@@ -19,6 +19,7 @@ Properties passed directly to `_.newText({...})` are merged on top of the persis
 | `fontColor` | `"#FFFFFF"` | Text color (any CSS color string) |
 | `fontFamily` | `"Arial"` | Font family name |
 | `fontWeight` | `400` | Font weight (normal text); styled segments override it |
+| `italic` | `false` | Renders the text in italic; styled segments override it |
 | `alignX` | `0` | Horizontal alignment: `-1` (left), `0` (center), `1` (right); each line shifts to that side of `posX` |
 | `alignY` | `0` | Vertical alignment: `-1` (top), `0` (center), `1` (bottom); the block shifts to that side of `posY` |
 | `lineGap` | `0` | Extra vertical space between lines in pixels (negative tightens) |
@@ -49,20 +50,24 @@ Each markup type is enabled by setting its symbol property - globally via `_.set
 
 ### Style markup (`styleSymbol`)
 
-`styleSymbol` is a list of entries `{openSymbol, closeSymbol?, color?, fontWeight?}`. Each entry chooses the symbols that open and close its styled region; `closeSymbol` defaults to `openSymbol`, which makes the entry a toggle.
+`styleSymbol` is a list of entries `{openSymbol, closeSymbol?, color?, fontWeight?, fontFamily?, italic?}`. Each entry chooses the symbols that open and close its styled region; `closeSymbol` defaults to `openSymbol`, which makes the entry a toggle.
 
 ```js
 _.setProp({
     styleSymbol: [
         {openSymbol: "*", fontWeight: 700},                      // *bold*
+        {openSymbol: "/", italic: true},                        // /italic/
+        {openSymbol: "{f ", closeSymbol: "}", fontFamily: "Times New Roman"},  // {f Times}
         {openSymbol: "{y ", closeSymbol: "}", color: "#FFE040"},  // {y yellow}
     ],
 });
 ```
 
 - `*bold text*` renders with `fontWeight: 700`
+- `/italic text/` renders italic; the same entry with `italic: false` turns italic **off** inside italic base text
+- `{f Times}` switches `fontFamily` for that region only, restoring the base family afterwards
 - Omitted fields keep the base style
-- One entry can set both color and weight
+- One entry can set several fields at once (`{openSymbol: "{f ", closeSymbol: "}", fontFamily: "Georgia", italic: true}`)
 - Styles stack and can be nested
 - An entry whose `openSymbol` and `closeSymbol` differ is an open/close pair; the closing symbol ends the innermost styled region, and one with no region open stays literal text
 
@@ -108,7 +113,7 @@ _.newText({text: "First line.\nSecond line."});
 
 - Newlines are not markup symbols - they work with every configuration and cannot be disabled.
 - Consecutive newlines collapse: blank lines create no vertical gap.
-- Style state (`color`/`fontWeight`) carries across breaks.
+- Style state (`color`/`fontWeight`/`fontFamily`/`italic`) carries across breaks.
 - `lineGap` adds extra space between lines, for both hard breaks and `maxWidth` wrapping.
 
 ### Automatic sizing
@@ -144,11 +149,11 @@ _.newText({text: "This has a ; that should not split.", segmentSymbol: null});
 ## Rendering pipeline
 
 1. Input text string
-2. `tokenizeText()` (`textParser.js`) - parse style and escape markers into tokens `[{text, color, fontWeight}, ...]`
+2. `tokenizeText()` (`textParser.js`) - parse style and escape markers into tokens `[{text, color, fontWeight, fontFamily, italic}, ...]`
 3. `chunkTokens()` - split tokens into word/space chunks, emitting `{break: true}` markers at `\n` characters
 4. Auto-sizing (when enabled) - remove hard-break markers, measure visible segments, and binary-search the largest positive `fontSizeStep` multiple that fits `maxWidth`
 5. `splitLines()` - measure widths and wrap at `maxWidth` (trailing spaces removed; break markers flush the current line; `balancedWidth` re-wraps with a reduced width)
-6. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, color, fontWeight}, ...]`
+6. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, color, fontWeight, fontFamily, italic}, ...]`
 7. `pushTextLine()` (`textEvents.js`) - measure segments, compute x-positions (centered, then shifted by `alignX`), push visual events; calls `prop.onTextSegment(textLength)` at each `"wait"` marker
 8. `newText()` (`textEvents.js`) - calls `prop.onTextSegment(textLength)` once at the end with the remaining accumulated length
 9. `render.js` - draws each text event at `(width / 2 + posX, height / 2 + posY)` with `textAlign: center`, `textBaseline: middle`; a tweened `fontSize` rescales those positions about the text's `posX`/`posY` anchor (`anchorX`/`anchorY`), so segments and line spacing resize together (see [Resizing](#resizing))

@@ -6,10 +6,15 @@ import {getGroupCenter} from "./visualEvents.js";
 
 // Properties that can be tweened with animate() / moveTo().
 const TWEEN_KEYS = new Set([
-    "posX", "posY", "rotation", "fontSize", "diameter",
+    "posX", "posY", "rotation", "fontSize", "diameter", "arc",
     "width", "height", "scaleX", "scaleY",
     "lineWidth", "strokeWidth", "opacity"
 ]);
+
+// Keys an orbit tween owns on its target: the sweep moves the object along an
+// arc and spins it by the same angle, so position/rotation tweens and orbits
+// never drive the same object at the same time.
+const ORBIT_KEYS = new Set(["posX", "posY", "rotation"]);
 
 // Latest property / color tween per drawable event.
 const propTweens = new WeakMap();
@@ -33,9 +38,94 @@ function chainValue(target, key) {
     return tween.from + (tween.to - tween.from) * tween.easing(p);
 }
 
+// True while a tween event still contributes at time t.
+function tweenActive(tween, t) {
+    return tween !== undefined && (tween.end === undefined || tween.end > t);
+}
+
+// Latest chain map of one target (created on first use).
+function chainOf(target) {
+    let chain = propTweens.get(target);
+    if (!chain) {
+        chain = new Map();
+        propTweens.set(target, chain);
+    }
+    return chain;
+}
+
+// Offset an orbit tween contributes to one target on a key at time t.
+// posX/posY sweep the captured pivot-relative vector; rotation adds the
+// swept angle to the captured spin, so the whole turn composes.
+function orbitValue(orbit, target, key, t) {
+    const span = orbit.tweenEnd - orbit.start;
+    const p = span <= 0 ? 1 : Math.min(Math.max((t - orbit.start) / span, 0), 1);
+    const swept = orbit.orbit.fromAngle + (orbit.orbit.toAngle - orbit.orbit.fromAngle) * orbit.easing(p);
+
+    if (key === "rotation") return orbit.orbit.r0 + swept;
+
+    const rad = swept * Math.PI / 180;
+    const {cx, cy, dx, dy} = orbit.orbit;
+    const x = cx + dx * Math.cos(rad) - dy * Math.sin(rad);
+    const y = cy + dx * Math.sin(rad) + dy * Math.cos(rad);
+
+    return key === "posX" ? x - target.posX : y - target.posY;
+}
+
 // Current tweened offset of one object on a property (used by setText()).
+// An active orbit supersedes the linear chain on its keys.
 export function getPropertyOffset(target, key) {
+    const now = getTime();
+    const orbit = propTweens.get(target)?.get("orbit");
+    if (ORBIT_KEYS.has(key) && tweenActive(orbit, now))
+        return orbitValue(orbit, target, key, now);
+
     return chainValue(target, key);
+}
+
+// Pin a value on a key by pushing a zero-span hold tween: the pose keeps
+// rendering (p clamps to 1) and later tweens chain from it.
+function holdValue(target, key, value, now) {
+    const hold = {
+        type: "tween",
+        target,
+        key,
+        from: value,
+        to: value,
+        start: now,
+        tweenEnd: now,
+        easing: (t) => t
+    };
+
+    chainOf(target).set(key, hold);
+    visual.push(hold);
+}
+
+// Close an active orbit on a target and hold its current pose, so position /
+// rotation tweens can chain from where the orbit left off.
+function releaseOrbit(target, now) {
+    const orbit = propTweens.get(target)?.get("orbit");
+    if (!tweenActive(orbit, now)) return;
+
+    for (const key of ORBIT_KEYS)
+        holdValue(target, key, orbitValue(orbit, target, key, now), now);
+
+    orbit.end = now;
+}
+
+// Close active linear posX/posY/rotation tweens on a target and hold their
+// values, so an orbit owns all three keys without losing the current pose.
+function releasePositionTweens(target, now) {
+    const chain = propTweens.get(target);
+    if (!chain) return;
+
+    for (const key of ORBIT_KEYS) {
+        const prev = chain.get(key);
+        if (!tweenActive(prev, now)) continue;
+
+        const value = chainValue(target, key);
+        prev.end = now;
+        holdValue(target, key, value, now);
+    }
 }
 
 // Every drawable event sharing at least one queried id, each included once.
@@ -57,11 +147,10 @@ function pushTweens(objects, keys, toValue, duration, easing) {
         for (const target of objects) {
             if (target[key] === undefined) continue;
 
-            let chain = propTweens.get(target);
-            if (!chain) {
-                chain = new Map();
-                propTweens.set(target, chain);
-            }
+            // A position/rotation tween supersedes an active orbit on the target.
+            if (ORBIT_KEYS.has(key)) releaseOrbit(target, now);
+
+            const chain = chainOf(target);
 
             const prev = chain.get(key);
             if (prev) prev.end = now;
@@ -235,4 +324,52 @@ export function recolor(id, color, duration = 0, opts = {}) {
 
     if (matched === 0)
         throw new Error(`recolor(): no visual events with id ${JSON.stringify(id)}.`);
+}
+
+// Orbit tween: sweep every object sharing a queried id along a circular arc
+// around a pivot point, spinning each by the same angle so the group turns
+// rigidly around it. `center` is the pivot ({x, y}); null (or omitted) uses
+// the group's bounding-box center. `angle` is clockwise degrees.
+export function rotateAround(id, center, angle, duration = 0, opts = {}) {
+    if (
+        center !== undefined && center !== null
+        && (typeof center !== "object" || Array.isArray(center)
+            || typeof center.x !== "number" || !Number.isFinite(center.x)
+            || typeof center.y !== "number" || !Number.isFinite(center.y))
+    )
+        throw new Error(`rotateAround() expects a {x, y} pivot point or null, got ${JSON.stringify(center)}.`);
+
+    if (typeof angle !== "number" || !Number.isFinite(angle))
+        throw new Error(`rotateAround() expects a finite angle in clockwise degrees, got ${angle}.`);
+
+    validateDuration(duration);
+
+    const easing = resolveEasing(opts);
+    const ids = toIdArray(id);
+    const objects = matchedObjects("rotateAround()", id);
+    const pivot = center ?? getGroupCenter(ids);
+    const now = getTime();
+
+    for (const target of objects) {
+        // Capture the current pose (active linear and orbit offsets included),
+        // then let the new orbit own posX / posY / rotation on this object.
+        const dx = target.posX + getPropertyOffset(target, "posX") - pivot.x;
+        const dy = target.posY + getPropertyOffset(target, "posY") - pivot.y;
+        const r0 = getPropertyOffset(target, "rotation");
+
+        releaseOrbit(target, now);
+        releasePositionTweens(target, now);
+
+        const orbit = {
+            type: "tween",
+            target,
+            orbit: {cx: pivot.x, cy: pivot.y, dx, dy, r0, fromAngle: 0, toAngle: angle},
+            start: now,
+            tweenEnd: now + duration,
+            easing
+        };
+
+        chainOf(target).set("orbit", orbit);
+        visual.push(orbit);
+    }
 }

@@ -5,14 +5,17 @@
 | Symptom | Cause | Fix |
 | - | - | - |
 | `visual.mp4` not found | Ran `node Engine/record.js` directly | Run an `anim_*.js` script instead |
-| FFmpeg not found | Path mismatch | Set the `FFMPEG_PATH` environment variable, or update the default in `Engine/utils.js` |
+| FFmpeg not found | Path mismatch | Set the `FFMPEG_PATH` environment variable, or update the default in `Engine/utils.js` (both `record()` and `addSounds()` fail fast with the resolved path) |
 | Missing audio in output | `addSounds()` commented out | Uncomment `addSounds()` to enable it |
 | Audio out of sync | Audio `start` depends on the time cursor (includes all `_.wait()` calls) | Check that `_.wait()` calls before `_.playSound()` match the intended timing |
 | Text not wrapping | `maxWidth` is `Infinity` by default | Set `_.setProp({maxWidth: 960})` before `_.newText()` |
 | Style not rendering | `styleSymbol` is `[]` by default | Pass `styleSymbol` entries in `newText()` |
 | Segment not splitting | `segmentSymbol` is `null` by default | Set `_.setProp({segmentSymbol: ";"})` or pass it in `newText()` |
 | "Missing audio file" | The resolved sound path does not exist: `_.playSound()` stores the path as written and `addSounds()` resolves it (shorthand map, then script directory) | Register it with `_.setAssets({click: "./Sounds/click.wav"})` and call `_.playSound("click")`, or pass a path relative to the script / an absolute path |
-| Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible, or give the event a `duration` |
+| Last text disappears instantly | No `_.wait()` after the last `_.newText()` | Add `_.wait(sec)` to keep it visible, or give the event a `duration` - `record()` also warns when events are never visible or get cut off |
+| `Cannot record: the timeline is 0 seconds long` | The cursor never advanced (no `wait()`, no `duration`, no `hold`) | Add a final `_.wait(sec)`, give the last event a `duration`, or call `_.waitUntilIdle()` |
+| `unknown property "maxwidth" - did you mean "maxWidth"?` | Typo in a property name (`setProp()` / `withProp()` / creators) | Fix the key; custom keys belong to the `addon` type |
+| `clear(): no visual events with id ...` (warning) | Usually a typo'd id - nothing matched, nothing changed | Check the id; known ids are listed in the warning |
 | `setText` throws "No text found with id" | No stored config for any queried id (`newText` never called with it) | Ensure `_.newText()` was called with that `id` before `_.setText()` |
 | `setText` replacement ends early | The stored config included a `duration` | Omit `duration` (or set `null`) on the original `newText()` call |
 | `callerPath` errors | Passed `import.meta.filename` instead of `import.meta.url` | Use `import.meta.url` (a `file://` URL) |

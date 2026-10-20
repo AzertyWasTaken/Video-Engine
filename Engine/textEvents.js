@@ -2,7 +2,7 @@
 import {Param, effectiveParam, mergeParam} from "./param.js";
 import {getSegmentsWidth, wrapTextSegments} from "./textParser.js";
 import {getTime, advanceTime, nextAutoId, textProp, visual} from "./state.js";
-import {normalizeIds, requireType, resolveDuration, validateDuration, validateOpacity, validateRotation} from "./validate.js";
+import {normalizeIds, requireType, resolveDuration, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
 
 // Accumulated text length across segments; reset per newText() and consumed
 // by onTextSegment callbacks at "wait" markers.
@@ -20,15 +20,17 @@ function pushTextSegment(prop, seg, posX, posY, end) {
         anchorX: prop.posX,
         anchorY: prop.posY,
         rotation: prop.rotation,
-        fontFamily: prop.fontFamily,
+        fontFamily: seg.fontFamily ?? prop.fontFamily,
         fontSize: prop.fontSize,
         fontColor: seg.color ?? prop.fontColor,
         fontWeight: seg.fontWeight ?? prop.fontWeight,
+        italic: seg.italic ?? prop.italic,
         flashDuration: prop.flashDuration,
         flashColor: prop.flashColor,
         fadeIn: prop.fadeIn,
         fadeOut: prop.fadeOut,
         opacity: prop.opacity,
+        layoutOrder: prop.layoutOrder,
         start: getTime()
     };
 
@@ -71,12 +73,16 @@ function pushTextLine(prop, segments, linePosY, end) {
 export function newText(newProp) {
     requireType("text");
 
-    const prop = mergeParam("text", newProp);
+    const prop = mergeParam("text", newProp, "newText()");
     validateOpacity(prop.opacity);
     validateRotation(prop.rotation);
+    validateLayoutOrder(prop.layoutOrder);
 
     if (typeof prop.text !== "string")
         throw new Error(`Text must be a string, got ${typeof prop.text}.`);
+
+    if (typeof prop.italic !== "boolean")
+        throw new Error(`italic must be a boolean, got ${JSON.stringify(prop.italic)}.`);
 
     prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
     textLength = 0;

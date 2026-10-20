@@ -1,15 +1,37 @@
 "use strict";
-import {Param, effectiveParam} from "./param.js";
+import {Param, effectiveParam, assertKnownKeys, suggestSimilar} from "./param.js";
 import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId} from "./state.js";
-import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateOpacity, validateRotation} from "./validate.js";
+import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
 import {setAssets as setAssetMap, getAssets as getAssetMap} from "./assets.js";
-import {getGroupCenter, pushVisual as pushVisualEvent} from "./visualEvents.js";
-import {addChapter as pushChapter, runScene as runSceneEvent} from "./chapters.js";
-import {animate as applyAnimate, moveTo as applyMoveTo, recolor as applyRecolor, getPropertyOffset} from "./tweens.js";
+import {getGroupCenter, getGroupSize, pushVisual as pushVisualEvent} from "./visualEvents.js";
+import {addChapter as pushChapter, runScene as runSceneEvent, chapterTimestamps} from "./chapters.js";
+import {animate as applyAnimate, moveTo as applyMoveTo, recolor as applyRecolor, rotateAround as applyRotateAround, getPropertyOffset} from "./tweens.js";
 import {newText as createText} from "./textEvents.js";
 
 // Per-type checkpoint stacks for saveParam() / undoParam().
 const propCheckpoints = new Map();
+
+// Warn (never throw) when an id matches no events yet - usually a typo.
+// Events are never removed, so legitimate clears keep matching.
+function describeUnknownId(action, ids) {
+    const known = [];
+    for (const event of visual) {
+        for (const key of event.ids ?? []) {
+            if (!known.includes(key)) known.push(key);
+        }
+        if (known.length >= 20) break;
+    }
+
+    const hints = ids
+        .map((id) => suggestSimilar(id, known))
+        .filter((hint, index, list) => hint !== null && list.indexOf(hint) === index);
+
+    return `${action}: no visual events with id ${JSON.stringify(ids.length === 1 ? ids[0] : ids)} - nothing changed.` +
+        (hints.length > 0 ? ` Did you mean ${hints.map((hint) => JSON.stringify(hint)).join(" or ")}?` : "") +
+        (known.length > 0
+            ? ` Known ids: ${known.slice(0, 8).map((key) => JSON.stringify(key)).join(", ")}.`
+            : " No visual events exist yet.");
+}
 
 // Public API facade. Timeline and event logic lives in the dedicated modules;
 // this object defines the full method surface used by animation scripts.
@@ -103,6 +125,7 @@ export const Engine = {
 
     setProp(newProp, type = "text") {
         requireType(type);
+        assertKnownKeys(type, newProp, "setProp()");
 
         for (const key in newProp) {
             // `undefined` re-inherits the global default on a type, so it skips validation.
@@ -112,12 +135,16 @@ export const Engine = {
             if (key === "rotation" && (type === "global" || newProp[key] !== undefined))
                 validateRotation(newProp[key]);
 
+            if (key === "layoutOrder" && (type === "global" || newProp[key] !== undefined))
+                validateLayoutOrder(newProp[key]);
+
             Param[type][key] = newProp[key];
         }
     },
 
     changeProp(newProp, type = "text") {
         requireType(type);
+        assertKnownKeys(type, newProp, "changeProp()");
 
         for (const key in newProp) {
             const keyA = effectiveParam(type, key);
@@ -185,17 +212,17 @@ export const Engine = {
         visual.push(event);
     },
 
-    pushVisual(type, newProp) {return pushVisualEvent(type, newProp);},
+    pushVisual(type, newProp) {return pushVisualEvent(type, newProp, "pushVisual()");},
 
     newText(newProp) {return createText(newProp);},
 
-    newLine(newProp) {return pushVisualEvent("line", newProp);},
+    newLine(newProp) {return pushVisualEvent("line", newProp, "newLine()");},
 
-    newRect(newProp) {return pushVisualEvent("rect", newProp);},
+    newRect(newProp) {return pushVisualEvent("rect", newProp, "newRect()");},
 
-    newCircle(newProp) {return pushVisualEvent("circle", newProp);},
+    newCircle(newProp) {return pushVisualEvent("circle", newProp, "newCircle()");},
 
-    newImage(newProp) {return pushVisualEvent("image", newProp);},
+    newImage(newProp) {return pushVisualEvent("image", newProp, "newImage()");},
 
     // ---- Scenes ----
 
@@ -205,6 +232,9 @@ export const Engine = {
 
     getChapters() {return chapters;},
 
+    // Video-description style chapter timestamps ("00:00 Intro - 00:05 Outro").
+    getChapterTimestamps() {return chapterTimestamps();},
+
     // ---- Tweens ----
 
     animate(id, deltas, duration = 0, opts = {}) {return applyAnimate(id, deltas, duration, opts);},
@@ -212,6 +242,8 @@ export const Engine = {
     moveTo(id, targets, duration = 0, opts = {}) {return applyMoveTo(id, targets, duration, opts);},
 
     recolor(id, color, duration = 0, opts = {}) {return applyRecolor(id, color, duration, opts);},
+
+    rotateAround(id, center, angle, duration = 0, opts = {}) {return applyRotateAround(id, center, angle, duration, opts);},
 
     // ---- Text updates ----
 
@@ -266,7 +298,10 @@ export const Engine = {
     centerText(id, posX = null, posY = null) {
         const ids = toIdArray(id);
 
-        if (!visual.some((value) => matchesIds(value, ids))) return;
+        if (!visual.some((value) => matchesIds(value, ids))) {
+            console.warn(describeUnknownId("centerText()", ids));
+            return;
+        }
 
         const center = getGroupCenter(ids);
 
@@ -293,6 +328,9 @@ export const Engine = {
         const ids = toIdArray(id);
         const now = getTime();
 
+        if (!visual.some((value) => matchesIds(value, ids)))
+            console.warn(describeUnknownId("clear()", ids));
+
         visual.forEach((value) => {
             if (matchesIds(value, ids)) {
                 if (value.end === undefined || value.end > now) value.end = now;
@@ -309,6 +347,11 @@ export const Engine = {
     },
 
     getSize(id) {
+        const ids = toIdArray(id);
+        return getGroupSize(ids);
+    },
+
+    getCenter(id) {
         const ids = toIdArray(id);
         return getGroupCenter(ids);
     },

@@ -2,7 +2,7 @@
 import {execFileSync} from "child_process";
 import fs from "fs";
 import path from "path";
-import {ffmpegPath, resolveCallerPath} from "./utils.js";
+import {ffmpegPath, resolveCallerPath, assertFFmpegExists} from "./utils.js";
 import {resolveAsset} from "./assets.js";
 import {findChapter, chapterFileName} from "./chapters.js";
 
@@ -109,6 +109,11 @@ export function addSounds(rawAudioEvents, videoDuration, callerFilePath, opts = 
     const videoDirectory = path.dirname(resolvedPath);
     let videoFilePath = path.join(videoDirectory, "visual.mp4");
     let outputFilePath = path.join(videoDirectory, "audio.mp4");
+
+    assertFFmpegExists();
+
+    if (!fs.existsSync(videoFilePath))
+        throw new Error(`addSounds(): video file not found at "${videoFilePath}" - call record() (or renderVideo()) first.`);
 
     let start = 0;
     let end = videoDuration;

@@ -17,6 +17,7 @@ Every object creator (`_.newText()`, `_.newLine()`, `_.newCircle()`, `_.newRect(
 | `alignX`, `alignY` | `0` | Alignment relative to `posX`/`posY`: `-1` left/top, `0` center, `1` right/bottom - the element sits on that side of the anchor (its opposite edge lands on `posX`/`posY`) |
 | `fadeIn`, `fadeOut` | `0` | Fade-in / fade-out durations (seconds) |
 | `opacity` | `1` | Base opacity from `0` (invisible) to `1` (opaque); multiplied by fade progress; tweenable |
+| `layoutOrder` | `0` | Draw order: higher values draw on top; equal values keep creation order (see Layout order below) |
 
 The tables below list the type-specific properties. See [engine-api.md](./engine-api.md#animation) for animating these properties over time.
 
@@ -46,6 +47,7 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 | Property | Default | Description |
 | - | - | - |
 | `diameter` | `40` | Circle size in pixels (see rendering note below) |
+| `arc` | `360` | Arc sweep in clockwise degrees from 12 o'clock; `360` is a full circle. A partial arc fills as a pie wedge; the stroke follows only the arc rim. Tweenable |
 | `strokeColor` | `null` | Stroke color; `null` disables the stroke |
 | `strokeWidth` | `4` | Stroke width in pixels |
 | `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
@@ -69,18 +71,18 @@ All events pushed to the visual timeline share this structure (`start` is set to
 | `type` | Fields | Description |
 | - | - | - |
 | `"background"` | `color`, `start`, `fadeIn`, `fadeOut`, `end?` | Fills the canvas; the most recent background with `start <= t < end` wins (default `#000000`) |
-| `"text"` | `ids`, `text`, `posX`, `posY`, `rotation`, `anchorX`, `anchorY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `flashDuration`, `flashColor`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Rendered text segment |
-| `"circle"` | `ids`, `posX`, `posY`, `rotation`, `diameter`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Filled circle (optional stroke) |
-| `"rect"` | `ids`, `posX`, `posY`, `rotation`, `width`, `height`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Filled rectangle (optional stroke) |
-| `"line"` | `ids`, `posX`, `posY`, `rotation`, `positions`, `scaleX`, `scaleY`, `lineWidth`, `loop`, `color`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Stroked polyline (closed when `loop` is set) |
-| `"image"` | `ids`, `src`, `posX`, `posY`, `rotation`, `width`, `height`, `fadeIn`, `fadeOut`, `opacity`, `start`, `end?` | Image overlay |
+| `"text"` | `ids`, `text`, `posX`, `posY`, `rotation`, `anchorX`, `anchorY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `italic`, `flashDuration`, `flashColor`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Rendered text segment |
+| `"circle"` | `ids`, `posX`, `posY`, `rotation`, `diameter`, `arc`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Filled circle (optional stroke), or a pie wedge when `arc` is below `360` |
+| `"rect"` | `ids`, `posX`, `posY`, `rotation`, `width`, `height`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Filled rectangle (optional stroke) |
+| `"line"` | `ids`, `posX`, `posY`, `rotation`, `positions`, `scaleX`, `scaleY`, `lineWidth`, `loop`, `color`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Stroked polyline (closed when `loop` is set) |
+| `"image"` | `ids`, `src`, `posX`, `posY`, `rotation`, `width`, `height`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Image overlay |
 | `"tween"` | `target`, `key`/`color`, `from`, `to`, `start`, `tweenEnd`, `easing`, `end?` | Animation event; resolved by the renderer, never drawn |
 
 ## Rendering geometry
 
 - **Text** - centered at `(width / 2 + posX, height / 2 + posY)`
 - **Rect** - top-left corner at `(width - w) / 2 + posX, (height - h) / 2 + posY`
-- **Circle** - arc centered at `(width / 2 + posX, height / 2 + posY)` (see the note above)
+- **Circle** - arc centered at `(width / 2 + posX, height / 2 + posY)` (see the note above); the arc starts at 12 o'clock and sweeps clockwise by `arc` degrees. Alignment and `centerText()` / `getSize()` still use the full-circle bounding box (`±diameter / 2`)
 - **Line** - path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex `{x, y}` in `positions` (an omitted axis is `0`), stroked with `lineWidth`; `loop` closes the path back to the first vertex, which stays inside the vertex bounding box so alignment and centering are unaffected
 - **Image** - top-left corner like rect, drawn from the image cache keyed on the original `src`
 - **Alignment** - `alignX`/`alignY` shift the element by half its bounding box to that side of the anchor: text lines shift by half the line width, the text block by half its total height, shapes by half their `width`/`height` or `diameter`, lines by their scaled vertex box plus `lineWidth`
@@ -89,6 +91,21 @@ All events pushed to the visual timeline share this structure (`start` is set to
 ## Grouping & centering
 
 `_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events sharing a queried id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id or an array of ids; each call affects every matching object exactly once. Works for text, rects, circles, lines, and images.
+
+## Layout order
+
+Overlapping objects draw **on top of each other in creation order** by default (later-created wins). `layoutOrder` overrides that stacking: objects draw in ascending `layoutOrder`, so a higher value lands on top regardless of when it was created; equal values keep creation order. The value is captured on each event when it is created, and the shared `global` default applies to every type:
+
+```js
+_.newCircle({id: "first", diameter: 80});                                      // created first...
+_.newRect({id: "second", width: 200, height: 200, layoutOrder: -1});            // ... but drawn behind
+```
+
+```js
+_.setProp({layoutOrder: -1}, "global");  // new objects go behind everything by default
+```
+
+The background always sits behind every object, and `layoutOrder` is a build-time value - it is not tweenable.
 
 Per-type bounding-box size: text uses its measured width and `fontSize`; circle uses `diameter`; line uses its scaled vertex extents plus `lineWidth`; image and rect use `width`/`height`.
 

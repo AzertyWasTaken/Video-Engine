@@ -88,6 +88,12 @@ export function validateOpacity(opacity) {
         throw new Error(`Opacity must be a finite number from 0 to 1, got ${opacity}.`);
 }
 
+// Layout stacking order: any finite number; higher draws on top.
+export function validateLayoutOrder(layoutOrder) {
+    if (typeof layoutOrder !== "number" || !Number.isFinite(layoutOrder))
+        throw new Error(`layoutOrder must be a finite number, got ${layoutOrder}.`);
+}
+
 // Validate a line's vertex array and return a fresh copy (events never share arrays).
 // Each axis is optional and defaults to 0, so `{x: 5}` and `{y: 5}` are valid vertices.
 export function normalizePositions(positions) {
@@ -122,4 +128,11 @@ export function validateScales(scaleX, scaleY) {
 export function validateLoop(loop) {
     if (typeof loop !== "boolean")
         throw new Error(`loop must be a boolean, got ${JSON.stringify(loop)}.`);
+}
+
+// Circle arc sweep in clockwise degrees: a finite number from 0 up.
+// Values above 360 render as a full circle.
+export function validateArc(arc) {
+    if (typeof arc !== "number" || !Number.isFinite(arc) || arc < 0)
+        throw new Error(`arc must be a finite number of clockwise degrees from 0 up, got ${arc}.`);
 }

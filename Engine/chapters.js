@@ -46,6 +46,26 @@ export function runScene(name, fn, opts = {}) {
 
 export function getChapters() {return chapters;}
 
+// Format seconds as mm:ss (or h:mm:ss past one hour) for chapter timestamps.
+export function formatTimestamp(sec) {
+    const total = Math.max(0, Math.floor(sec));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const seconds = total % 60;
+
+    const tail = `${String(minutes).padStart(hours > 0 ? 2 : 1, "0")}:${String(seconds).padStart(2, "0")}`;
+    return hours > 0 ? `${hours}:${tail}` : tail;
+}
+
+// Video-description style chapter list (e.g. "00:00 Intro").
+// An open last chapter resolves against the current time cursor.
+export function chapterTimestamps() {
+    const now = getTime();
+    return chapters.map((chapter) =>
+        `${formatTimestamp(chapter.start)} ${chapter.name} - ${formatTimestamp(chapter.end ?? now)}`
+    );
+}
+
 // Find a chapter by name; an open end (null) resolves to the total duration.
 export function findChapter(name, duration) {
     const chapter = chapters.find((chapter) => chapter.name === name);

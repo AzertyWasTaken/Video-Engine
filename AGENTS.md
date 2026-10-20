@@ -22,8 +22,9 @@ The `Engine` uses **global mutable state**: a monotonically increasing `time` cu
 4. **Before editing `record.js` or `addSounds.js`:** FFmpeg arguments are order-sensitive. Test with short durations first. Both import the shared `resolveCallerPath()` and `ffmpegPath` from `Engine/utils.js`.
 5. **Testing:** run `node anim_template.js` and verify both `visual.mp4` and `audio.mp4` are produced. Watch for console warnings (image loading failures, FFmpeg errors).
 6. **Debugging:** add `console.log` in `engine.js` methods to trace the time cursor and event pushes. Inspect `_.getVisualTimeline()`, `_.getAudioTimeline()`, and `_.getEvents(id)`.
-7. **When in doubt:** read [docs/internals.md](./docs/internals.md) for engine internals and [docs/troubleshooting.md](./docs/troubleshooting.md) for known failure modes. `TODO.md` tracks planned features and completed work.
-8. **Template import paths:** `anim_template.js` imports everything from `./Engine/...` and passes `import.meta.url` to both `record()` and `addSounds()`. New animations should do the same.
+7. **When in doubt:** read [Docs/internals.md](./Docs/internals.md) for engine internals and [Docs/troubleshooting.md](./Docs/troubleshooting.md) for known failure modes. `TODO.md` tracks planned features and completed work.
+8. **Testing:** `npm test` (unit + `previewFrame` integration tests, no FFmpeg needed) and `node anim_template.js` (full pipeline: verifies both `visual.mp4` and `audio.mp4` are produced).
+9. **Template import paths:** `anim_template.js` imports everything from `./Engine/...` and passes `import.meta.url` to both `record()` and `addSounds()`. New animations should do the same.
 
 ## File editing best practices
 

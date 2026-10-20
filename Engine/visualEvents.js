@@ -5,16 +5,16 @@ import {getTime, advanceTime, nextAutoId, visual} from "./state.js";
 import {
     matchesIds, normalizeIds, normalizePositions,
     requireType, resolveDuration,
-    validateDuration, validateLoop, validateOpacity, validateRotation, validateScales
+    validateArc, validateDuration, validateLayoutOrder, validateLoop, validateOpacity, validateRotation, validateScales
 } from "./validate.js";
 
 // Fields copied from the merged config into each visual event.
 // Adding a visual type means one entry here plus a draw branch in render.js.
 const VISUAL_FIELDS = {
-    line: ["posX", "posY", "rotation", "positions", "scaleX", "scaleY", "lineWidth", "loop", "color", "fadeIn", "fadeOut", "opacity"],
-    rect: ["posX", "posY", "rotation", "width", "height", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity"],
-    circle: ["posX", "posY", "rotation", "diameter", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity"],
-    image: ["posX", "posY", "rotation", "src", "width", "height", "fadeIn", "fadeOut", "opacity"]
+    line: ["posX", "posY", "rotation", "positions", "scaleX", "scaleY", "lineWidth", "loop", "color", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
+    rect: ["posX", "posY", "rotation", "width", "height", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
+    circle: ["posX", "posY", "rotation", "diameter", "arc", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
+    image: ["posX", "posY", "rotation", "src", "width", "height", "fadeIn", "fadeOut", "opacity", "layoutOrder"]
 };
 
 // Bounding box of an event relative to its posX/posY anchor, used for
@@ -65,8 +65,9 @@ function getItemBox(item) {
     }
 }
 
-// Get the center point of grouped `id` items
-export function getGroupCenter(ids) {
+// Bounding box of grouped `id` items in canvas space (unrotated, the same
+// box alignment baking and centerText() use). Empty group: every edge 0.
+export function getGroupBounds(ids) {
     const updMin = (a, b) => a > b || a === null ? b : a;
     const updMax = (a, b) => a < b || a === null ? b : a;
 
@@ -85,17 +86,34 @@ export function getGroupCenter(ids) {
         }
     });
 
-    return {x: ((minPos.x ?? 0) + (maxPos.x ?? 0)) / 2, y: ((minPos.y ?? 0) + (maxPos.y ?? 0)) / 2};
+    return {minX: minPos.x ?? 0, minY: minPos.y ?? 0, maxX: maxPos.x ?? 0, maxY: maxPos.y ?? 0};
+}
+
+// Get the center point of grouped `id` items
+export function getGroupCenter(ids) {
+    const box = getGroupBounds(ids);
+    return {x: (box.minX + box.maxX) / 2, y: (box.minY + box.maxY) / 2};
+}
+
+// Size of the bounding box of grouped `id` items
+export function getGroupSize(ids) {
+    const box = getGroupBounds(ids);
+    return {width: box.maxX - box.minX, height: box.maxY - box.minY};
 }
 
 // Generic visual event creation, table-driven via VISUAL_FIELDS.
-export function pushVisual(type, newProp) {
+export function pushVisual(type, newProp, source = "pushVisual()") {
     requireType(type);
 
-    const prop = mergeParam(type, newProp);
+    const prop = mergeParam(type, newProp, source);
     validateOpacity(prop.opacity);
     validateRotation(prop.rotation);
+    validateLayoutOrder(prop.layoutOrder);
     prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
+
+    if (type === "circle") {
+        validateArc(prop.arc);
+    }
 
     if (type === "line") {
         validateScales(prop.scaleX, prop.scaleY);

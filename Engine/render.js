@@ -1,5 +1,6 @@
 "use strict";
 import {Canvas, loadImage} from "skia-canvas";
+import {fontString} from "./textParser.js";
 
 let canvas, width, height, pixelWidth, pixelHeight;
 const imageCache = new Map();
@@ -10,6 +11,15 @@ const imageCache = new Map();
 let cachedVisualRef = null;
 let cachedVisualLength = -1;
 let cachedSortedEvents = null;
+
+// True while any cached event carries a non-zero layoutOrder:
+// only then does render() reorder the active set (stable sort,
+// so equal values keep their creation/start order). Tween and
+// background events never carry the key, so they fall back to 0.
+let sortedHasLayoutOrder = false;
+
+// Stacking comparator: higher layoutOrder draws on top.
+const byLayoutOrder = (a, b) => (a.layoutOrder ?? 0) - (b.layoutOrder ?? 0);
 
 // Reused per-frame tween buffers (cleared at the start of every frame).
 const tweenOffsets = new Map(); // target event -> {key: offset value}
@@ -46,6 +56,7 @@ function getSortedEvents(visual) {
         .sort((a, b) =>(a.start ?? 0) - (b.start ?? 0));
         cachedVisualRef = visual;
         cachedVisualLength = visual.length;
+        sortedHasLayoutOrder = cachedSortedEvents.some((event) => (event.layoutOrder ?? 0) !== 0);
     }
     return cachedSortedEvents;
 }
@@ -81,8 +92,9 @@ function pushRelevantObjects(objects, t, visual) {
 }
 
 // Collect active tween contributions into the reused per-frame maps.
-// Tween events carry either a property override (target + key) or a color
-// override (target + color), both addressing one drawable event.
+// Tween events carry a property override (target + key), a color override
+// (target + color), or an orbit override (target + orbit), all addressing
+// one drawable event.
 function collectTweens(objects, t) {
     tweenOffsets.clear();
     tweenColors.clear();
@@ -101,6 +113,23 @@ function collectTweens(objects, t) {
             const g = Math.round(from[1] + (to[1] - from[1]) * e);
             const b = Math.round(from[2] + (to[2] - from[2]) * e);
             tweenColors.set(obj.target, `rgb(${r},${g},${b})`);
+        } else if (obj.orbit) {
+            // Sweep the captured pivot-relative vector by the eased angle and
+            // spin the object by the same sweep, so the group turns rigidly
+            // around the pivot. No allocation beyond the offset entry.
+            const swept = obj.orbit.fromAngle + (obj.orbit.toAngle - obj.orbit.fromAngle) * e;
+            const rad = swept * Math.PI / 180;
+            const {cx, cy, dx, dy} = obj.orbit;
+
+            let entry = tweenOffsets.get(obj.target);
+            if (entry === undefined) {
+                entry = {};
+                tweenOffsets.set(obj.target, entry);
+            }
+
+            entry.posX = cx + dx * Math.cos(rad) - dy * Math.sin(rad) - obj.target.posX;
+            entry.posY = cy + dx * Math.sin(rad) + dy * Math.cos(rad) - obj.target.posY;
+            entry.rotation = obj.orbit.r0 + swept;
         } else {
             const value = obj.from + (obj.to - obj.from) * e;
 
@@ -136,6 +165,12 @@ export function render(visual, t) {
     const ctx = canvas.getContext("2d");
     const objects = [];
     pushRelevantObjects(objects, t, visual);
+
+    // Stack overlapping objects by layoutOrder (higher draws on top).
+    // Skipped unless some event sets a non-zero order, so the default
+    // path stays untouched; the start-sorted cache above keeps feeding
+    // the binary search regardless.
+    if (sortedHasLayoutOrder) objects.sort(byLayoutOrder);
 
     // Find the active background plus the previous one (crossfade underlay).
     let background = null;
@@ -237,7 +272,7 @@ export function render(visual, t) {
                 textY = height / 2 + obj.anchorY + (obj.posY - obj.anchorY) * scale + (tw?.posY ?? 0);
             }
 
-            ctx.font = `${obj.fontWeight} ${fontSize}px ${obj.fontFamily}`;
+            ctx.font = fontString(obj.italic, obj.fontWeight, fontSize, obj.fontFamily);
             ctx.fillText(obj.text, textX, textY);
         }
         else if (obj.type === "rect") {
@@ -261,13 +296,22 @@ export function render(visual, t) {
             }
         }
         else if (obj.type === "circle") {
-            ctx.beginPath();
             const radius = Math.max(0, (obj.diameter + (tw?.diameter ?? 0)) / 2);
-            ctx.arc(posX, posY, radius, 0, 2 * Math.PI);
+            // Arc sweep in clockwise degrees from 12 o'clock; 360 (default) is a full circle.
+            const sweep = Math.min(Math.max(obj.arc + (tw?.arc ?? 0), 0), 360) * Math.PI / 180;
+            const startAngle = -Math.PI / 2;
+
+            // A partial arc fills as a pie wedge to the center; at 360 this is the same disc as before.
+            ctx.beginPath();
+            ctx.moveTo(posX, posY);
+            ctx.arc(posX, posY, radius, startAngle, startAngle + sweep);
             ctx.fillStyle = colorOverride ?? obj.color;
             ctx.fill();
 
+            // The stroke follows only the arc rim, never the radius edges.
             if (obj.strokeColor) {
+                ctx.beginPath();
+                ctx.arc(posX, posY, radius, startAngle, startAngle + sweep);
                 ctx.lineWidth = obj.strokeWidth;
                 ctx.strokeStyle = obj.strokeColor;
                 ctx.stroke();

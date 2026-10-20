@@ -4,36 +4,30 @@
 
 ## Update log
 
-- Rotation: a `rotation` property (clockwise **degrees**, default `0`) is now a shared `global` default for every object type - text, lines, rects, circles and images. It rotates around the object's anchor (`posX`/`posY` for shapes, the layout anchor for text, so a multi-line or multi-segment text turns as one unit) and is tweenable, so `animate(id, {rotation: 360})` and `moveTo(id, {rotation: 180})` both work. Rotation is a drawing transform only: stored `width`/`height`/`positions` stay unrotated, so alignment and `centerText()` keep using the unrotated bounding box. Replaces the "Rotation global" item below
-- Rendering resolution: `CONFIG` takes an optional `SCALE` (default `1`) that multiplies the encoded resolution without touching the framing - `WIDTH/HEIGHT` stay the design space every event is positioned in, while the canvas, FFmpeg's `-video_size` and the frame readback are `WIDTH * SCALE x HEIGHT * SCALE` pixels. `{WIDTH: 1920, HEIGHT: 1080, FPS: 12, SCALE: 2}` records 3840x2160 with identical composition (a sharper output, at proportionally more pixels and encode time). Fractional values work (`1.5` -> 2880x1620)
-- Closed lines and default position axes: `_.newLine()` takes a `loop` option (default `false`) that closes the path by stroking one extra segment from the last vertex back to the first.
-- Every `positions` entry may now omit `x` or `y` - a missing axis defaults to `0`, so `positions: [{x: 120}, {y: -60}]` is a valid pair of vertices. `loop` requires at least 3 positions and throws otherwise
-- Asset shorthands: `_.setAssets({"click": "./Sounds/click.wav", "favicon": "./Images/favicon.png"})` registers one shorthand map for **both** sounds and images, so `_.playSound("click")` and `_.newImage({src: "favicon"})` store the short name in the timeline; `record()` / `addSounds()` resolve it at the end (shorthand, then absolute path, then relative to the calling script). This replaces `_.setAudioFile()`, which joined sound paths against a base at `playSound()` time
-- Line paths: `newLine()` takes a `positions` array of `{x, y}` vertices (relative to `posX`/`posY`, multiplied by the new `scaleX`/`scaleY` options) instead of `lengthX`/`lengthY`; `scaleX`/`scaleY` replace them as the tweenable size properties
-- Style markup symbols: `styleSymbol` entries are now `{openSymbol, closeSymbol?, color?, fontWeight?}`; each entry picks its own opening and closing symbols and may require several symbols in a row, replacing the old `symbol` + `braces: true` form (`{y text}` is now `{openSymbol: "{y ", closeSymbol: "}"}`, and `closeSymbol` defaults to `openSymbol` for a toggle)
-- Easing direction: an optional `direction` option (`"in"` default, `"out"`, `"inOut"`) shapes any easing into that form, so `{easing: "quad", direction: "out"}` replaces the old `"quadOut"` name
-- Object opacity: `opacity` is a shared `global` default for text and visual objects, from `0` (invisible) to `1` (opaque); it is stored on each event and combined with fade progress
-- Custom line gaps: `lineGap` text property adds extra space between lines (default `0`)
-- Line breaks in text with `\n`
-- Strokes for circles and rectangles (`strokeColor`, `strokeWidth`)
+- Group orbits: `_.rotateAround(id, center, angle, duration, opts)` tweens every object sharing a queried id along a circular arc around a pivot `{x, y}` (`null` defaults to the group bounding-box center) while spinning each by the same clockwise angle, so the group turns rigidly around the pivot; orbits chain with position/rotation tweens in both directions without snaps.
+- Group queries: `_.getSize(id)` returns the bounding-box `{width, height}` of every object sharing a queried id and `_.getCenter(id)` returns its `{x, y}` center.
+- Usability hardening: `record()` throws on a 0-second timeline and warns about events that are never visible or get cut off (the forgotten-final-`wait()` class)
+- Fast iteration: `previewFrame(CONFIG, import.meta.url, {t, out})` in `Engine/pipeline.js` renders one frame to PNG next to the script with no FFmpeg
+- Chapter timestamps: `_.getChapterTimestamps()` returns video-description lines (`"00:00 Intro - 00:05 Outro"`, `mm:ss` or `h:mm:ss`)
+- Automated tests: `test/*.test.js` with Node's built-in runner (`npm test`), covering validate/param/timeline/chapters/tweens/text plus a `previewFrame` PNG integration test; `package.json` also gains `npm run render`
+- Style markup: `styleSymbol` entries are now `{openSymbol, closeSymbol?, color?, fontWeight?, fontFamily?, italic?}`, so a region can switch font family and slant as well as color and weight (e.g. `{openSymbol: "/", italic: true}` and `{openSymbol: "{f ", closeSymbol: "}", fontFamily: "Times New Roman"}`). A new `italic` text property (default `false`) sets the whole text to italic; style markup overrides it per region, and `italic: false` in an entry turns it back off inside italic text. Measurement and rendering share one `fontString()` helper, so a region using a different family or slant is measured at the width it is actually drawn
+- Layout order: a shared `global` numeric `layoutOrder` property (default `0`) stacks objects independently of creation order - higher values draw on top, equal values keep creation order; set per object (e.g. `_.newRect({layoutOrder: -1})`) or for all new objects with `_.setProp({layoutOrder: -1}, "global")`
+- Incomplete circle arcs: `_.newCircle()` takes an `arc` option (clockwise **degrees** from 12 o'clock, default `360`) that draws a partial circle - the fill is a pie wedge and the stroke follows only the arc rim. `arc` is tweenable with `_.animate()` / `_.moveTo()`
 
 ## Features
 
-- [ ] Change text font with wrapping style TODO
-- [ ] Set text to italic with wrapping style TODO
+- [ ] Exponent and subscripts style wrapping TODO
 - [ ] Auto color symbols (option to color specific symbols only) TODO
 - [ ] Repeat & auto cancel tween mode TODO
-- [ ] Generate chapters timestamps
 - [ ] Custom sound for last text segment
 - [ ] Bullet lists
 - [ ] Table
-- [ ] Exponentiation wrapping `^`
 - [ ] `autoSetPos` align option
 
 ## Quality
 
+- [ ] Separate render and anim engines TODO
 - [ ] Remove flash parameter TODO
-- [ ] Layout order TODO
 - [ ] Run multiple chapters merged in a single video TODO
 - [ ] Auto volume modifier for sound shorthand TODO
 - [ ] Relative position option TODO

@@ -21,6 +21,8 @@ _.getDuration()      // Total elapsed time (current time cursor value)
 
 Every event is positioned at the **current** `time` cursor. `_.wait()` advances it and `_.seek()` sets it directly. Events can also end on their own via the `duration` property (see below).
 
+`record()` refuses a 0-second timeline (`"Cannot record: the timeline is 0 seconds long..."`) and warns when events start at/after the video end (never visible) or end past it (cut off) - both usually mean a forgotten final `_.wait()`. Chapter renders skip the warning since clipping to the chapter window is intentional.
+
 ```js
 _.wait(2)                        // time = 2
 _.newText({...})                 // text event starts at time = 2
@@ -47,6 +49,7 @@ _.waitUntilIdle();
 _.chapter(name)                    // Mark a chapter boundary at the current time
 _.scene(name, fn, opts)            // Mark a chapter, run fn(), close the chapter at the cursor
 _.getChapters()                    // All chapter entries [{name, start, end}]
+_.getChapterTimestamps()           // Video-description lines "00:00 Intro - 00:05 Outro"
 ```
 
 - `chapter(name)` closes the previous chapter at the current time and pushes `{name, start, end: null}`. Names must be unique and non-empty (duplicate names throw).
@@ -61,6 +64,8 @@ _.scene("intro", () => {
 ```
 
 Scenes are a naming/marking layer only: the time cursor and `Param` defaults stay global inside `fn()`. Combine with `withProp()` for scoped defaults.
+
+`_.getChapterTimestamps()` formats chapters as `mm:ss` lines (`h:mm:ss` past one hour) for video descriptions; an open last chapter resolves against the current time cursor.
 
 `record()` / `addSounds()` take a `{chapter: name}` option to render a single chapter - see [recording.md](./recording.md#recording-a-single-chapter).
 
@@ -77,7 +82,7 @@ _.clear("ui");                                   // affects every object tagged 
 _.animate("main", {posX: 100});                  // affects every object tagged "main"
 ```
 
-Every id argument - a creator's `id` property or the `id` parameter of `clear()`, `centerText()`, `getEvents()`, `getSize()`, `setText()`, `animate()`, `moveTo()`, `recolor()` - accepts a single id or an array of ids. A call affects an object **iff it shares at least one queried id, and each matching object exactly once**; objects that share no queried id are ignored.
+Every id argument - a creator's `id` property or the `id` parameter of `clear()`, `centerText()`, `getEvents()`, `getSize()`, `getCenter()`, `setText()`, `animate()`, `moveTo()`, `recolor()`, `rotateAround()` - accepts a single id or an array of ids. A call affects an object **iff it shares at least one queried id, and each matching object exactly once**; objects that share no queried id are ignored.
 
 Every creator accepts a `hold` property that advances the time cursor after the event spawns - equivalent to following the call with `_.wait(hold)`:
 
@@ -90,7 +95,7 @@ _.newCircle({diameter: 50, hold: 1});              // same as newCircle(...) the
 
 Default properties per type (`"text"`, `"line"`, `"rect"`, `"circle"`, `"image"`) live in `Engine/param.js` and persist across calls. Properties passed directly to `newText()` etc. are merged on top for that call only.
 
-The ten shared keys (`id`, `posX`, `posY`, `rotation`, `alignX`, `alignY`, `fadeIn`, `fadeOut`, `opacity`, `duration`) also have a `global` default. Each type declares them as `undefined` and inherits the global value; setting one on a type (or per call) overrides it locally, and setting it back to `undefined` re-inherits. `opacity` ranges from `0` (invisible) to `1` (opaque). `rotation` is in clockwise degrees about the object's anchor (`posX`/`posY` for shapes, the layout anchor for text) and must be a finite number; `setText()` carries a rotation tween's current offset into the replacement text.
+The eleven shared keys (`id`, `posX`, `posY`, `rotation`, `alignX`, `alignY`, `fadeIn`, `fadeOut`, `opacity`, `duration`, `layoutOrder`) also have a `global` default. Each type declares them as `undefined` and inherits the global value; setting one on a type (or per call) overrides it locally, and setting it back to `undefined` re-inherits. `opacity` ranges from `0` (invisible) to `1` (opaque). `rotation` is in clockwise degrees about the object's anchor (`posX`/`posY` for shapes, the layout anchor for text) and must be a finite number; `setText()` carries a rotation tween's current offset into the replacement text. `layoutOrder` is a finite number (default `0`) that stacks overlapping objects independently of creation order - higher values draw on top, equal values keep creation order.
 
 Opacity is captured on the event when it is created, so later global-default changes do not affect existing objects.
 
@@ -111,7 +116,8 @@ _.withProp(newProp, type, fn)              // Scoped defaults: apply, run fn(), 
 _.withProp({type: newProp, ...}, fn)       // Scoped defaults for multiple types at once
 ```
 
-- `type` also accepts `"global"` for the ten shared keys: `_.setProp({opacity: 0.5}, "global")` changes every type that has not set its own `opacity`, and the multi-type form accepts it too (`_.withProp({global: {...}, circle: {...}}, fn)`). `getProp()` reports the effective (inherited) value; `getGlobalProp()` returns the raw object where inherited keys are `undefined`.
+- `type` also accepts `"global"` for the eleven shared keys: `_.setProp({opacity: 0.5}, "global")` changes every type that has not set its own `opacity`, and the multi-type form accepts it too (`_.withProp({global: {...}, circle: {...}}, fn)`). `getProp()` reports the effective (inherited) value; `getGlobalProp()` returns the raw object where inherited keys are `undefined`.
+- Property keys are validated: an unknown key (e.g. `maxwidth`) throws with a "did you mean" suggestion (the `addon` type is the extension point and skips validation). This covers `setProp()`, `changeProp()`, `withProp()`, and every creator.
 - `changeProp()` throws `Nonnumber values are not accepted` if the current value or the delta is not finite. Use `setProp()` for non-numeric properties. `opacity` must remain a finite number from `0` to `1`.
 - Checkpoint stacks are **per type**: `saveParam("circle")` pairs with `undoParam("circle")`, and mixing types cannot pop the wrong checkpoint. `undoParam()` throws when no checkpoint exists for the type.
 - `withProp(newProp, fn)` defaults to `type: "text"`. The snapshot is restored in a `finally` block, even when `fn()` throws:
@@ -171,11 +177,13 @@ A stored config must exist for one of the queried ids (`textProp` keeps the last
 _.setBackgroundColor(color, opts = {})      // Add a background event at the current time
 _.newLine(newProp)                          // Polyline through positions (vertices relative to posX/posY, times scaleX/scaleY; loop closes the path)
 _.newRect(newProp)                          // Rectangle centered at (posX, posY)
-_.newCircle(newProp)                        // Circle at (posX, posY)
+_.newCircle(newProp)                        // Circle at (posX, posY); arc (< 360) draws a partial circle clockwise from 12 o'clock
 _.newImage(newProp)                         // Image overlay at (posX, posY)
 _.clear(id, fadeOut)                        // End all active events sharing a queried id
 _.centerText(id, posX = null, posY = null)  // Reposition a group so its bounding-box center moves to (posX, posY)
 _.getEvents(id)                             // All visual events sharing a queried id (array copy)
+_.getSize(id)                                // Bounding-box size of the group as {width, height}
+_.getCenter(id)                              // Bounding-box center of the group as {x, y}
 ```
 
 - All creators accept `duration` (seconds until the event auto-ends) and **return the group's ids**.
@@ -191,6 +199,7 @@ _.getEvents(id)                             // All visual events sharing a queri
 _.animate(id, deltas, duration = 1, opts = {})      // Tween property deltas over time
 _.moveTo(id, targets, duration = 1, opts = {})      // Tween properties to absolute target values
 _.recolor(id, color, duration = 1, opts = {})       // Tween every matching event's color
+_.rotateAround(id, center, angle, duration = 0, opts = {})  // Sweep the group on an arc around a pivot, spinning with it
 ```
 
 ```js
@@ -211,15 +220,16 @@ _.wait(1);
 
 Rules:
 
-- `animate()` deltas are **relative**: `{posX: -200}` slides the group 200 px left of where it is right now. Tweenable properties: `posX`, `posY`, `rotation`, `fontSize`, `diameter`, `width`, `height`, `scaleX`, `scaleY`, `lineWidth`, `strokeWidth`, `opacity`. Anything else throws.
+- `animate()` deltas are **relative**: `{posX: -200}` slides the group 200 px left of where it is right now. Tweenable properties: `posX`, `posY`, `rotation`, `fontSize`, `diameter`, `arc`, `width`, `height`, `scaleX`, `scaleY`, `lineWidth`, `strokeWidth`, `opacity`. Anything else throws.
 - `moveTo()` targets are **absolute** final values: `posX`/`posY` place the bounding-box center of the group at that canvas offset (like `centerText()`), and any other key ends with the property rendered at exactly that value (`{fontSize: 40}` ends at font size 40). Omit keys to leave properties untouched. An `opacity` target must be from `0` to `1` - anything else throws, like `setProp()`.
+- `rotateAround()` sweeps every matching object along a circular arc around the pivot `center` (`{x, y}`; `null` or omitted uses the group bounding-box center) while spinning each object by the same `angle` (clockwise degrees), so the group turns rigidly around the pivot. It owns `posX`/`posY`/`rotation` on its objects: a position/rotation tween started during an orbit supersedes it (the group holds the pose reached so far), and an orbit started during position/rotation tweens captures the current pose - chains never snap.
 - A tweened `opacity` is combined with the object's `fadeIn`/`fadeOut` progress and clamped to `0`..`1`, so an overshooting easing (`back` / `elastic`) never draws out of range. `animate()` deltas are not range-checked (a delta's valid range depends on the value it starts from) - the clamp handles them.
 - `opts.easing` is one of `linear` (default), `quad`, `cubic`, `sin`, `expo`, `circ`, `back`, `elastic` (see `Engine/easing.js`), or a custom `(t) => easedT` function.
 - `opts.direction` shapes that curve: `"in"` (default, slow start), `"out"` (slow end), or `"inOut"` (slow start and end). Each curve is defined in its `in` form and the direction is applied to it, so `{easing: "quad", direction: "out"}` is the old `"quadOut"` and `{easing: "back", direction: "out"}` still overshoots on the way in. Any other direction throws.
 - Tweens target every object that shares a queried id **at call time**, each exactly once, so multi-segment text stays aligned; objects created after the call are not affected by it. A tweened `fontSize` scales the whole text layout - segment spacing and line spacing included - about the text's `posX`/`posY` anchor, so `alignX`/`alignY` keep holding; only the wrapping (`maxWidth` line breaks) stays at the build-time layout.
 - Tweens **chain**: animating the same property again starts from where the previous tween is at the current time cursor and supersedes it - no snaps, no double-counting.
 - `recolor()` needs hex colors (`#RGB` / `#RRGGBB`) for the target color and for the events being recolored.
-- Elements must exist first: all three throw when no visual events share a queried id.
+- Elements must exist first: all four throw when no visual events share a queried id.
 - Tweens do not advance the time cursor - `wait()` through them to see them play.
 
 ## Sound & assets
@@ -252,6 +262,8 @@ _.getVisualTimeline()  // Visual events array (includes tween events)
 _.getAudioTimeline()   // Audio events array
 _.getDuration()        // Total seconds
 _.getEvents(id)        // Visual events sharing a queried id (excludes tween events)
+_.getSize(id)           // Bounding-box size of the group {width, height}
+_.getCenter(id)         // Bounding-box center of the group {x, y}
 ```
 
 Pass these to `record()` and `addSounds()` - see [recording.md](./recording.md). If you mutate the visual array, keep using the same reference (from `_.getVisualTimeline()`) so the `render.js` cache stays valid.
@@ -259,6 +271,7 @@ Pass these to `record()` and `addSounds()` - see [recording.md](./recording.md).
 ## Rendering & recording rules
 
 - An event is drawn when `t >= event.start && t < (event.end ?? Infinity)`. Its `opacity` (plus any tweened offset, clamped to `0`..`1`) is multiplied by `fadeIn`/`fadeOut` progress within that window.
+- Draw order stacks active objects by `layoutOrder` ascending (higher draws on top); equal values keep creation order, so the `0` default reproduces exactly the old creation-order stacking. The background always sits behind every object.
 - Tween events (`type: "tween"`) are resolved before drawing each frame: property tweens offset their target object by the tweened properties, color tweens override one event's color.
 - The background is the most recent background event with `start <= t` and `t < end` (defaults to `#000000`). While `fadeIn`/`fadeOut` progress, the active color is alpha-composited over the previous background color. Background events do not use the object `opacity` default.
 - `record()` samples `Math.ceil(FPS * duration)` frames at `t = f / FPS`.

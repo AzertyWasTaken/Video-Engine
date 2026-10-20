@@ -6,8 +6,9 @@ canvas.gpu = true;
 const ctx = canvas.getContext("2d");
 
 // Produces an ordered list of segments with style state applied across the whole input text.
-// Each returned segment has the form `{text: <string>, color: <string|null>, fontWeight: <number|null>}`.
-// Every entry is matched on its own `openSymbol` / `closeSymbol` strings, so it can require any
+// Each returned segment has the form `{text: <string>, color: <string|null>, fontWeight: <number|null>,
+// fontFamily: <string|null>, italic: <boolean|null>}`. Every entry is matched on its own
+// `openSymbol` / `closeSymbol` strings, so it can require any
 // number of symbols in a row. `closeSymbol` defaults to `openSymbol` (toggle on / off).
 // Special characters (style open and close symbols, and escape) can be escaped.
 function tokenizeText(text, styleDefs, escapeCh) {
@@ -29,6 +30,10 @@ function tokenizeText(text, styleDefs, escapeCh) {
             throw new Error(`styleSymbol color must be a string, got ${JSON.stringify(def.color)}.`);
         if (def.fontWeight !== undefined && (typeof def.fontWeight !== "number" || !Number.isFinite(def.fontWeight)))
             throw new Error(`styleSymbol fontWeight must be a finite number, got ${JSON.stringify(def.fontWeight)}.`);
+        if (def.fontFamily !== undefined && (typeof def.fontFamily !== "string" || def.fontFamily.length === 0))
+            throw new Error(`styleSymbol fontFamily must be a non-empty string, got ${JSON.stringify(def.fontFamily)}.`);
+        if (def.italic !== undefined && typeof def.italic !== "boolean")
+            throw new Error(`styleSymbol italic must be a boolean, got ${JSON.stringify(def.italic)}.`);
 
         // A repeated open/close pair behaves exactly like a single toggle symbol.
         const toggle = def.closeSymbol === undefined || def.closeSymbol === def.openSymbol;
@@ -47,16 +52,24 @@ function tokenizeText(text, styleDefs, escapeCh) {
     // capturing the current style state, then reset the buffer.
     const flush = () => {
         if (current.length > 0) {
+            // `null` means "not overridden here", so an entry with `italic: false`
+            // still turns italic off inside italic text.
             let color = null;
             let fontWeight = null;
+            let fontFamily = null;
+            let italic = null;
             for (let i = styleStack.length - 1; i >= 0; i--) {
                 if (color === null && styleStack[i].color !== undefined)
                     color = styleStack[i].color;
                 if (fontWeight === null && styleStack[i].fontWeight !== undefined)
                     fontWeight = styleStack[i].fontWeight;
-                if (color !== null && fontWeight !== null) break;
+                if (fontFamily === null && styleStack[i].fontFamily !== undefined)
+                    fontFamily = styleStack[i].fontFamily;
+                if (italic === null && styleStack[i].italic !== undefined)
+                    italic = styleStack[i].italic;
+                if (color !== null && fontWeight !== null && fontFamily !== null && italic !== null) break;
             }
-            tokens.push({text: current, color, fontWeight});
+            tokens.push({text: current, color, fontWeight, fontFamily, italic});
         }
         current = "";
     };
@@ -106,9 +119,17 @@ function tokenizeText(text, styleDefs, escapeCh) {
     return tokens;
 }
 
+// Single source of truth for the canvas font shorthand, shared with render.js so the
+// measured width of a segment always matches the width actually drawn.
+export function fontString(italic, fontWeight, fontSize, fontFamily) {
+    return `${italic ? "italic " : ""}${fontWeight} ${fontSize}px ${fontFamily}`;
+}
+
 function measureChunkWidth(chunk, prop) {
     const weight = chunk.fontWeight ?? prop.fontWeight;
-    ctx.font = `${weight} ${prop.fontSize}px ${prop.fontFamily}`;
+    const family = chunk.fontFamily ?? prop.fontFamily;
+    const italic = chunk.italic ?? prop.italic;
+    ctx.font = fontString(italic, weight, prop.fontSize, family);
     return ctx.measureText(chunk.text).width;
 }
 
@@ -125,7 +146,7 @@ function measureChunksWidth(chunks, prop) {
 }
 
 export function measureTextWidth(item) {
-    ctx.font = `${item.fontWeight} ${item.fontSize}px ${item.fontFamily}`;
+    ctx.font = fontString(item.italic, item.fontWeight, item.fontSize, item.fontFamily);
     return ctx.measureText(item.text).width;
 }
 
@@ -160,10 +181,10 @@ function chunkTokens(tokens) {
                 const word = words[i];
 
                 if (i > 0)
-                    chunks.push({text: " ", color: seg.color, fontWeight: seg.fontWeight});
+                    chunks.push({text: " ", color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
 
                 if (word.length > 0)
-                    chunks.push({text: word, color: seg.color, fontWeight: seg.fontWeight});
+                    chunks.push({text: word, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
             }
         }
     }
@@ -249,7 +270,7 @@ function fitTextFontSize(prop, chunks) {
 // Wrap chunks by measuring line widths.
 // Remove last character (space) at the end of each line.
 // `{break: true}` markers from chunkTokens() force a hard line break.
-function splitLines(chunks, prop) {
+function splitLines(chunks, maxWidth, prop) {
     const lines = [];
     let currentLine = [];
     let currentWidth = 0;
@@ -276,7 +297,7 @@ function splitLines(chunks, prop) {
         // End line if it reaches maximum allowed width.
         if (
             currentLine.length > 0
-            && (currentWidth + w) > prop.maxWidth
+            && (currentWidth + w) > maxWidth
             && isSpace(currentLine.at(-1).text)
         ) {
             // Remove trailing space at the end of each line.
@@ -308,7 +329,7 @@ function segTextLine(line, symbol, escape) {
 
             if (ch === symbol) {
                 if (current.length > 0)
-                    result.push({text: current, color: seg.color, fontWeight: seg.fontWeight});
+                    result.push({text: current, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
 
                 current = "";
                 result.push("wait");
@@ -328,10 +349,36 @@ function segTextLine(line, symbol, escape) {
         }
 
         if (current.length > 0)
-            result.push({text: current, color: seg.color, fontWeight: seg.fontWeight});
+            result.push({text: current, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
     }
 
     return result;
+}
+
+function preSplitLines(chunks, prop) {
+    // Auto-sized text is already verified to fit on one line.
+    if (prop.autoSize) return [chunks];
+
+    let maxWidth = prop.maxWidth;
+    let lines = splitLines(chunks, maxWidth, prop);
+
+    if (prop.balancedWidth && lines.length > 1) {
+        let add = prop.maxWidth;
+
+        while (add >= 40) {
+            add /= 2;
+            maxWidth -= add;
+            const newLines = splitLines(chunks, maxWidth, prop);
+
+            if (newLines.length === lines.length) {
+                lines = newLines;
+            } else {
+                maxWidth += add;
+            }
+        }
+    }
+
+    return lines;
 }
 
 // Wrap while preserving style state across line breaks.
@@ -355,23 +402,7 @@ export function wrapTextSegments(prop) {
     }
 
     // Auto-sized text is already verified to fit on one line.
-    let lines = prop.autoSize ? [chunks] : splitLines(chunks, prop);
-
-    if (prop.balancedWidth && lines.length > 1) {
-        let add = prop.maxWidth;
-
-        while (add >= 40) {
-            add /= 2;
-            prop.maxWidth -= add;
-            const newLines = splitLines(chunks, prop);
-
-            if (newLines.length === lines.length) {
-                lines = newLines;
-            } else {
-                prop.maxWidth += add;
-            }
-        }
-    }
+    let lines = preSplitLines(chunks, prop);
 
     // Split text segments and remove used escape bars
     if (prop.segmentSymbol !== null) {

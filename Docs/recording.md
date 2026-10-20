@@ -97,15 +97,16 @@ The `FFMPEG_PATH` environment variable takes precedence. Alternatively, edit the
 
    ```js
    import {Engine as _} from "./Engine/engine.js";
-   import {record} from "./Engine/record.js";
-   import {addSounds} from "./Engine/addSounds.js";
+   import {renderVideo} from "./Engine/pipeline.js";
    ```
 
 3. **Set CONFIG** (`WIDTH`, `HEIGHT`, `FPS`).
 4. **Set defaults** with `_.setProp({...})`, `_.setBackgroundColor(...)`, and `_.setAssets({...})` for script-relative sounds and images.
 5. **Build the timeline** with `_.newText()`, `_.wait()`, `_.playSound()`, etc.
-6. **Encode**: `await record(CONFIG, visual, duration, import.meta.url);` then `addSounds(audio, duration, import.meta.url);`
+6. **Encode** with one call: `await renderVideo(CONFIG, import.meta.url, {audio: true})`, or `await record(...)` + `addSounds(...)` from `Engine/record.js` / `Engine/addSounds.js` for manual control.
+
+**Iterate quickly:** `await previewFrame(CONFIG, import.meta.url, {t: 1.5})` (also from `Engine/pipeline.js`) renders one frame to `preview.png` next to the script - no FFmpeg, sub-second visual checks.
+
+Property names are validated: an unknown key (e.g. `maxwidth` instead of `maxWidth`) throws an error with a "did you mean" suggestion. Custom keys belong to the `addon` type.
 
 **Always pass `import.meta.url`** (a `file://` URL, not `import.meta.filename`) so outputs are written next to your animation script regardless of the working directory.
-
-> Note: `anim_template.js` currently imports `record`/`addSounds` via `../Anim/Engine/...` paths and stores `import.meta.url` in a `filename` variable. This works, but new animations should use `./Engine/...`.

@@ -13,7 +13,7 @@ node anim_template.js
 
 This produces `visual.mp4` (video-only) and `audio.mp4` (video + mixed audio) next to the script.
 
-**Requirements:** Node.js 18+ (ES modules), `@napi-rs/canvas` (installed via `npm install`), and FFmpeg (default `C:/ffmpeg/bin/ffmpeg.exe`; override with the `FFMPEG_PATH` environment variable - see [docs/recording.md](./docs/recording.md#ffmpeg-configuration)).
+**Requirements:** Node.js 18+ (ES modules), `skia-canvas` (installed via `npm install`), and FFmpeg (default `C:/ffmpeg/bin/ffmpeg.exe`; override with the `FFMPEG_PATH` environment variable - see [recording](./Docs/recording.md#ffmpeg-configuration)).
 
 ## How it works
 
@@ -67,25 +67,25 @@ Creators return the group's ids (a unique id is auto-assigned when `id` is omitt
 | `Engine/visualEvents.js` | Table-driven visual event creation (`pushVisual`) and group centering |
 | `Engine/tweens.js` | Property and color tween chains (`animate()`, `moveTo()`, `recolor()`) |
 | `Engine/textEvents.js` | Text event layout and creation (`newText()`) |
-| `Engine/chapters.js` | Chapter/scene markers (`chapter()`, `scene()`, `getChapters()`) |
+| `Engine/chapters.js` | Chapter/scene markers (`chapter()`, `scene()`, `getChapters()`, `getChapterTimestamps()`) |
 | `Engine/param.js` | Default property objects per type (`text`, `line`, `rect`, `circle`, `image`) plus shared `global` fallbacks |
 | `Engine/textParser.js` | Text tokenization (markup), width measurement, line wrapping, segment splitting |
 | `Engine/easing.js` | Easing functions for tweens (`linear`, `quad*`, `cubic*`) |
 | `Engine/render.js` | Per-frame Canvas renderer (cached sort + binary search, tween resolution) |
 | `Engine/record.js` | Streams frames to FFmpeg, producing `visual.mp4` (also preloads image assets) |
 | `Engine/addSounds.js` | Delays and mixes audio events over the video, producing `audio.mp4` |
-| `Engine/pipeline.js` | One-call render helper (`renderVideo`, `getTimeline`) |
+| `Engine/pipeline.js` | One-call render helper (`renderVideo`, `previewFrame`, `getTimeline`) |
 | `Engine/utils.js` | Shared FFmpeg path and caller path resolution |
 
 ## Documentation
 
 | Document | Contents |
 | - | - |
-| [docs/engine-api.md](./docs/engine-api.md) | Full `Engine` API reference, time model, property defaults, checkpoints, animation |
-| [docs/text.md](./docs/text.md) | Text properties, markup (bold/color/segments/escaping), rendering pipeline |
-| [docs/visuals.md](./docs/visuals.md) | Line/rect/circle/image properties, element types, rendering geometry |
-| [docs/recording.md](./docs/recording.md) | `record()` / `addSounds()`, FFmpeg setup, creating a new animation |
-| [docs/internals.md](./docs/internals.md) | Module-by-module implementation notes and performance considerations |
-| [docs/troubleshooting.md](./docs/troubleshooting.md) | Common symptoms, causes, and fixes |
+| [engine-api](./Docs/engine-api.md) | Full `Engine` API reference, time model, property defaults, checkpoints, animation |
+| [text](./Docs/text.md) | Text properties, markup (bold/color/segments/escaping), rendering pipeline |
+| [visuals](./Docs/visuals.md) | Line/rect/circle/image properties, element types, rendering geometry |
+| [recording](./Docs/recording.md) | `record()` / `addSounds()`, FFmpeg setup, creating a new animation |
+| [internals](./Docs/internals.md) | Module-by-module implementation notes and performance considerations |
+| [troubleshooting](./Docs/troubleshooting.md) | Common symptoms, causes, and fixes |
 | [AGENTS.md](./AGENTS.md) | Guidance for AI agents and maintainers |
 | [TODO.md](./TODO.md) | Planned features and update log |
