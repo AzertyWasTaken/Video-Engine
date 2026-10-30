@@ -41,13 +41,13 @@ export function requireType(type) {
 // selects the multi-type form; anything else is treated as props for one type.
 export function resolvePropEntries(newProp) {
     if (!newProp || typeof newProp !== "object")
-        return [["text", newProp ?? {}]];
+        return [["global", newProp ?? {}]];
 
     const keys = Object.keys(newProp);
     const typeKeys = keys.filter((key) => Param[key] && typeof newProp[key] === "object" && newProp[key] !== null);
 
     if (typeKeys.length === 0)
-        return [["text", newProp ?? {}]];
+        return [["global", newProp ?? {}]];
 
     if (typeKeys.length !== keys.length) {
         const stray = keys.filter((key) => !typeKeys.includes(key)).join(", ");

@@ -4,24 +4,21 @@ import {getSegmentsWidth, wrapTextSegments} from "./textParser.js";
 import {getTime, advanceTime, nextAutoId, textProp, visual} from "./state.js";
 import {normalizeIds, requireType, resolveDuration, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
 
-// Accumulated text length across segments; reset per newText() and consumed
-// by onTextSegment callbacks at "wait" markers.
-let textLength = 0;
+// Distinct automatic ids collected for each part of the current newText() call.
+let currentPartId = null;
 
-function pushTextSegment(prop, seg, posX, posY, end) {
+function pushTextSegment(prop, seg, posX, posY, end, ids) {
     const event = {
         type: "text",
-        ids: prop.id,
+        ids,
         text: seg.text,
         posX,
         posY,
-        // Layout anchor: posX/posY are pixel offsets from the text config
-        // anchor, so a tweened font size scales the whole layout about it.
         anchorX: prop.posX,
         anchorY: prop.posY,
         rotation: prop.rotation,
         fontFamily: seg.fontFamily ?? prop.fontFamily,
-        fontSize: prop.fontSize,
+        fontSize: (seg.fontSize ?? 1) * prop.fontSize,
         fontColor: seg.color ?? prop.fontColor,
         fontWeight: seg.fontWeight ?? prop.fontWeight,
         italic: seg.italic ?? prop.italic,
@@ -31,14 +28,17 @@ function pushTextSegment(prop, seg, posX, posY, end) {
         fadeOut: prop.fadeOut,
         opacity: prop.opacity,
         layoutOrder: prop.layoutOrder,
-        start: getTime()
+        start: getTime(),
+        offsetY: seg.offsetY ?? 0,
+        // Segment fontSize multiplier relative to base fontSize
+        segFontSizeMultiplier: seg.fontSize ?? 1,
     };
 
     if (end !== null) event.end = end;
     visual.push(event);
 }
 
-function pushTextLine(prop, segments, linePosY, end) {
+function pushTextLine(prop, segments, linePosY, end, multiSegment, partIds) {
     // If parsing removed everything (edge-case), throw an error.
     if (segments.length === 0)
         throw new Error("Text lines must have at least one segment.");
@@ -51,19 +51,19 @@ function pushTextLine(prop, segments, linePosY, end) {
         const seg = segments[i];
 
         if (typeof seg === "object") {
-            textLength += seg.text.length;
+            if (multiSegment && currentPartId === null) {
+                currentPartId = nextAutoId();
+                partIds.push(currentPartId);
+            }
             const segWidth = segWidths[i];
-
             const segCenterOffset = currWidth + segWidth / 2 - totalWidth / 2;
             // Adjust x-position depending of `prop.alignX`
             const segPosX = prop.posX + segCenterOffset + totalWidth * prop.alignX / 2;
-
-            pushTextSegment(prop, seg, segPosX, linePosY, end);
-
+            const ids = multiSegment ? [...prop.id, currentPartId] : prop.id;
+            pushTextSegment(prop, seg, segPosX, linePosY + (seg.offsetY ?? 0) * prop.fontSize, end, ids);
             currWidth += segWidth;
         } else {
-            prop.onTextSegment(textLength);
-            textLength = 0;
+            currentPartId = null;
         }
     }
 
@@ -85,14 +85,31 @@ export function newText(newProp) {
         throw new Error(`italic must be a boolean, got ${JSON.stringify(prop.italic)}.`);
 
     prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
-    textLength = 0;
-
     const end = resolveDuration(prop.duration);
 
     // Wrap while preserving style state across line breaks.
     let lines = wrapTextSegments(prop);
 
-    // Cache only after layout succeeds; invalid autoSize settings must not leave text state.
+    // Count contiguous runs of text segments separated by "wait" markers.
+    let partCount = 0;
+    let inPart = false;
+    for (const line of lines) {
+        for (const seg of line) {
+            if (typeof seg === "object") {
+                if (!inPart) {
+                    partCount++;
+                    inPart = true;
+                }
+            } else {
+                inPart = false;
+            }
+        }
+    }
+
+    const multiSegment = partCount >= 2;
+    const partIds = [];
+    currentPartId = null;
+
     for (const idKey of prop.id) textProp[idKey] = prop;
 
     const lineHeight = prop.fontSize;
@@ -105,15 +122,13 @@ export function newText(newProp) {
     posY += totalHeight * prop.alignY / 2;
 
     let totalWidth = 0;
+    // Distinct automatic id for the current segment part; null between parts.
     for (let i = 0; i < lines.length; i++) {
         const lineSegments = lines[i];
-        const lineWidth = pushTextLine(prop, lineSegments, posY, end);
+        const lineWidth = pushTextLine(prop, lineSegments, posY, end, multiSegment, partIds);
         totalWidth = Math.max(totalWidth, lineWidth);
         posY += lineHeight + lineGap;
     }
-
-    prop.onTextSegment(textLength);
-    textLength = 0;
 
     if (prop.autoSetPosX) Param.text.posX = effectiveParam("text", "posX") + totalWidth;
     if (prop.autoSetPosY) Param.text.posY = effectiveParam("text", "posY") + totalHeight;
@@ -123,5 +138,47 @@ export function newText(newProp) {
     validateDuration(hold);
     advanceTime(hold);
 
+    if (multiSegment) return {id: prop.id, seg: partIds};
     return prop.id;
+}
+
+// Batch-create multiple text events from an array of config objects.
+// Each config is passed to newText() with automatic vertical spacing:
+// if a config omits posY, it is placed `lineGap` below the previous text.
+// Returns an array of ids, one per created text.
+export function newTexts(texts, configs) {
+    if (!Array.isArray(texts))
+        throw new Error(`newTexts() expects an array of text configs, got ${JSON.stringify(texts)}.`);
+
+    const {textGap, posY} = configs;
+    delete configs.textGap;
+    delete configs.posY;
+
+    const ids = [];
+    let cursorY = posY;
+
+    for (const text of texts) {
+        if (typeof text !== "object" || text === null || Array.isArray(text))
+            throw new Error(`newTexts() each config must be an object, got ${JSON.stringify(text)}.`);
+
+        const merged = {...text, ...configs};
+
+        // Auto-space: if posY is not set, place below previous text.
+        if (merged.posY === undefined) {
+            merged.posY = cursorY;
+        }
+
+        const id = newText(merged);
+        ids.push(id);
+
+        // Advance cursorY by fontSize + lineGap so the next text stacks below.
+        // Use the merged config's fontSize (defaults resolve inside newText).
+        const fontSize = merged.fontSize ?? Param.text.fontSize;
+        const lineGap = merged.lineGap ?? Param.text.lineGap;
+        const lineCount = wrapTextSegments(mergeParam("text", merged, "newTexts()")).length
+        const textHeight = fontSize * lineCount + lineGap * (lineCount - 1);
+        cursorY += (textHeight + fontSize) / 2 + textGap;
+    }
+
+    return ids;
 }

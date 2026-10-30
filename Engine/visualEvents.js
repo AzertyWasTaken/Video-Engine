@@ -5,13 +5,14 @@ import {getTime, advanceTime, nextAutoId, visual} from "./state.js";
 import {
     matchesIds, normalizeIds, normalizePositions,
     requireType, resolveDuration,
-    validateArc, validateDuration, validateLayoutOrder, validateLoop, validateOpacity, validateRotation, validateScales
+    validateArc, validateDuration, validateLayoutOrder, validateOpacity, validateRotation, validateScales
 } from "./validate.js";
 
 // Fields copied from the merged config into each visual event.
 // Adding a visual type means one entry here plus a draw branch in render.js.
 const VISUAL_FIELDS = {
-    line: ["posX", "posY", "rotation", "positions", "scaleX", "scaleY", "lineWidth", "loop", "color", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
+    line: ["posX", "posY", "rotation", "positions", "scaleX", "scaleY", "lineWidth", "color", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
+    shape: ["posX", "posY", "rotation", "positions", "scaleX", "scaleY", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
     rect: ["posX", "posY", "rotation", "width", "height", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
     circle: ["posX", "posY", "rotation", "diameter", "arc", "color", "strokeColor", "strokeWidth", "fadeIn", "fadeOut", "opacity", "layoutOrder"],
     image: ["posX", "posY", "rotation", "src", "width", "height", "fadeIn", "fadeOut", "opacity", "layoutOrder"]
@@ -54,6 +55,34 @@ function getItemBox(item) {
             }
 
             const half = item.lineWidth / 2;
+            return {minX: minX - half, maxX: maxX + half, minY: minY - half, maxY: maxY + half};
+        }
+
+        case "shape": {
+            let minX = 0;
+            let maxX = 0;
+            let minY = 0;
+            let maxY = 0;
+            let first = true;
+
+            for (const vertex of item.positions) {
+                const x = vertex.x * item.scaleX;
+                const y = vertex.y * item.scaleY;
+
+                if (first) {
+                    minX = maxX = x;
+                    minY = maxY = y;
+                    first = false;
+                    continue;
+                }
+
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+            }
+
+            const half = (item.strokeWidth ?? 0) / 2;
             return {minX: minX - half, maxX: maxX + half, minY: minY - half, maxY: maxY + half};
         }
 
@@ -117,14 +146,12 @@ export function pushVisual(type, newProp, source = "pushVisual()") {
 
     if (type === "line") {
         validateScales(prop.scaleX, prop.scaleY);
-        validateLoop(prop.loop);
         prop.positions = normalizePositions(prop.positions);
+    }
 
-        // Closing the path needs a real segment, so 3 vertices is the minimum.
-        if (prop.loop && prop.positions.length < 3)
-            throw new Error(
-                `loop needs at least 3 positions to close the path, got ${prop.positions.length}.`
-            );
+    if (type === "shape") {
+        validateScales(prop.scaleX, prop.scaleY);
+        prop.positions = normalizePositions(prop.positions);
     }
 
     const event = {type, ids: prop.id, start: getTime()};

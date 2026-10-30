@@ -6,8 +6,10 @@ canvas.gpu = true;
 const ctx = canvas.getContext("2d");
 
 // Produces an ordered list of segments with style state applied across the whole input text.
-// Each returned segment has the form `{text: <string>, color: <string|null>, fontWeight: <number|null>,
-// fontFamily: <string|null>, italic: <boolean|null>}`. Every entry is matched on its own
+// Each returned segment has the form `{text, color, fontWeight, fontFamily, italic, fontSize, offsetY}`.
+// `fontSize` and `offsetY` are multipliers relative to the text's base `fontSize`, resolved to
+// pixels during measurement (textParser.js) and event creation (textEvents.js).
+// Every entry is matched on its own
 // `openSymbol` / `closeSymbol` strings, so it can require any
 // number of symbols in a row. `closeSymbol` defaults to `openSymbol` (toggle on / off).
 // Special characters (style open and close symbols, and escape) can be escaped.
@@ -34,6 +36,10 @@ function tokenizeText(text, styleDefs, escapeCh) {
             throw new Error(`styleSymbol fontFamily must be a non-empty string, got ${JSON.stringify(def.fontFamily)}.`);
         if (def.italic !== undefined && typeof def.italic !== "boolean")
             throw new Error(`styleSymbol italic must be a boolean, got ${JSON.stringify(def.italic)}.`);
+        if (def.fontSize !== undefined && (typeof def.fontSize !== "number" || !Number.isFinite(def.fontSize) || def.fontSize <= 0))
+            throw new Error(`styleSymbol fontSize must be a finite number greater than 0 (relative to the text fontSize), got ${JSON.stringify(def.fontSize)}.`);
+        if (def.offsetY !== undefined && (typeof def.offsetY !== "number" || !Number.isFinite(def.offsetY)))
+            throw new Error(`styleSymbol offsetY must be a finite number (relative to the text fontSize), got ${JSON.stringify(def.offsetY)}.`);
 
         // A repeated open/close pair behaves exactly like a single toggle symbol.
         const toggle = def.closeSymbol === undefined || def.closeSymbol === def.openSymbol;
@@ -58,6 +64,8 @@ function tokenizeText(text, styleDefs, escapeCh) {
             let fontWeight = null;
             let fontFamily = null;
             let italic = null;
+            let fontSize = null;
+            let offsetY = null;
             for (let i = styleStack.length - 1; i >= 0; i--) {
                 if (color === null && styleStack[i].color !== undefined)
                     color = styleStack[i].color;
@@ -67,9 +75,14 @@ function tokenizeText(text, styleDefs, escapeCh) {
                     fontFamily = styleStack[i].fontFamily;
                 if (italic === null && styleStack[i].italic !== undefined)
                     italic = styleStack[i].italic;
-                if (color !== null && fontWeight !== null && fontFamily !== null && italic !== null) break;
+                if (fontSize === null && styleStack[i].fontSize !== undefined)
+                    fontSize = styleStack[i].fontSize;
+                if (offsetY === null && styleStack[i].offsetY !== undefined)
+                    offsetY = styleStack[i].offsetY;
+                if (color !== null && fontWeight !== null && fontFamily !== null && italic !== null
+                    && fontSize !== null && offsetY !== null) break;
             }
-            tokens.push({text: current, color, fontWeight, fontFamily, italic});
+            tokens.push({text: current, color, fontWeight, fontFamily, italic, fontSize, offsetY});
         }
         current = "";
     };
@@ -129,7 +142,9 @@ function measureChunkWidth(chunk, prop) {
     const weight = chunk.fontWeight ?? prop.fontWeight;
     const family = chunk.fontFamily ?? prop.fontFamily;
     const italic = chunk.italic ?? prop.italic;
-    ctx.font = fontString(italic, weight, prop.fontSize, family);
+    // `fontSize` is a styleSymbol multiplier (1 = base size); resolve to pixels so
+    // auto-sizing (which swaps `prop.fontSize`) scales overrides correctly.
+    ctx.font = fontString(italic, weight, (chunk.fontSize ?? 1) * prop.fontSize, family);
     return ctx.measureText(chunk.text).width;
 }
 
@@ -181,10 +196,10 @@ function chunkTokens(tokens) {
                 const word = words[i];
 
                 if (i > 0)
-                    chunks.push({text: " ", color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
+                    chunks.push({text: " ", color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic, fontSize: seg.fontSize, offsetY: seg.offsetY});
 
                 if (word.length > 0)
-                    chunks.push({text: word, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
+                    chunks.push({text: word, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic, fontSize: seg.fontSize, offsetY: seg.offsetY});
             }
         }
     }
@@ -329,7 +344,7 @@ function segTextLine(line, symbol, escape) {
 
             if (ch === symbol) {
                 if (current.length > 0)
-                    result.push({text: current, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
+                    result.push({text: current, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic, fontSize: seg.fontSize, offsetY: seg.offsetY});
 
                 current = "";
                 result.push("wait");
@@ -349,7 +364,7 @@ function segTextLine(line, symbol, escape) {
         }
 
         if (current.length > 0)
-            result.push({text: current, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic});
+            result.push({text: current, color: seg.color, fontWeight: seg.fontWeight, fontFamily: seg.fontFamily, italic: seg.italic, fontSize: seg.fontSize, offsetY: seg.offsetY});
     }
 
     return result;
@@ -365,7 +380,7 @@ function preSplitLines(chunks, prop) {
     if (prop.balancedWidth && lines.length > 1) {
         let add = prop.maxWidth;
 
-        while (add >= 40) {
+        while (add >= prop.widthStep) {
             add /= 2;
             maxWidth -= add;
             const newLines = splitLines(chunks, maxWidth, prop);

@@ -23,8 +23,45 @@ const colorTweens = new WeakMap();
 // Build-time cache of parsed hex colors for recolor().
 const colorCache = new Map();
 
-function resolveEasing(opts) {
-    return getEasing(opts.easing ?? "linear", opts.direction ?? "in");
+// Map an easing direction to its mirror on the reverse leg:
+// in -> out, out -> in, inOut stays inOut.
+function mirrorDirection(direction) {
+    if (direction === "in") return "out";
+    if (direction === "out") return "in";
+    return "inOut";
+}
+
+// Resolve an easing, optionally shaping the direction into its mirror
+// (used for the auto-reverse leg when reverseMirror is enabled).
+function resolveEasing(opts, mirror = false) {
+    const direction = mirror ? mirrorDirection(opts.direction ?? "in") : opts.direction ?? "in";
+    return getEasing(opts.easing ?? "linear", direction);
+}
+
+// Resolve the tween-reverse options shared by animate()/moveTo()/recolor()/rotateAround().
+// When enabled, a completed tween mirrors forward-to-back (after an optional
+// reverseDelay). The mirror event is pushed into `visual` only - never into a
+// chain WeakMap - so forward chain reads and later superseding tweens stay
+// anchored to the completed value rather than the not-yet-started reverse.
+// When reverseMirror is true, the mirror leg uses the mirrored easing direction:
+// in -> out, out -> in, inOut -> inOut.
+function resolveReverseOpts(opts) {
+    const {reverse, reverseDelay, reverseMirror} = opts;
+    const mirrorAliases = ["mirror", "mirrorReverse", "mirrorDirection", "reverseDirection", "reverseEase", "mirrorEase", "yoyoEase"];
+    let mirror = reverseMirror;
+    for (const alias of mirrorAliases) {
+        if (mirror !== undefined) break;
+        if (opts[alias] !== undefined) mirror = opts[alias];
+    }
+    if (reverse !== undefined && typeof reverse !== "boolean")
+        throw new Error(`reverse must be a boolean, got ${JSON.stringify(reverse)}.`);
+    if (mirror !== undefined && typeof mirror !== "boolean")
+        throw new Error(`reverseMirror must be a boolean, got ${JSON.stringify(mirror)}.`);
+    if (reverseDelay !== undefined) {
+        if (typeof reverseDelay !== "number" || !Number.isFinite(reverseDelay) || reverseDelay < 0)
+            throw new Error(`reverseDelay must be a finite non-negative number of seconds, got ${JSON.stringify(reverseDelay)}.`);
+    }
+    return {reverse: reverse === true, reverseMirror: mirror === true, reverseDelay: reverseDelay ?? 0};
 }
 
 // Value the current tween chain holds for one object on `key` at the time cursor.
@@ -140,7 +177,12 @@ function matchedObjects(action, id) {
 // continuous and active windows never overlap. `toValue` resolves the absolute
 // end value for one object / key from its current chain value. Objects that do
 // not define the key are skipped (nothing would render them).
-function pushTweens(objects, keys, toValue, duration, easing) {
+// Push one tween event per (object, key). A new tween supersedes the previous
+// one for the same (object, key) by closing its window, so chained tweens stay
+// continuous and active windows never overlap. `toValue` resolves the absolute
+// end value for one object / key from its current chain value. Objects that do
+// not define the key are skipped (nothing would render them).
+function pushTweens(objects, keys, toValue, duration, easing, reverse, reverseEasing = easing) {
     const now = getTime();
 
     for (const key of keys) {
@@ -170,6 +212,22 @@ function pushTweens(objects, keys, toValue, duration, easing) {
 
             chain.set(key, tween);
             visual.push(tween);
+
+            // Mirror the tween backward after a delay so it auto-reverses to its
+            // start value. Only into `visual` (the renderer overwrites by start
+            // order), never into `propTweens`.
+            if (reverse.reverse) {
+                visual.push({
+                    type: "tween",
+                    target,
+                    key,
+                    from: tween.to,
+                    to: tween.from,
+                    start: tween.tweenEnd + reverse.reverseDelay,
+                    tweenEnd: tween.tweenEnd + reverse.reverseDelay + duration,
+                    easing: reverseEasing
+                });
+            }
         }
     }
 }
@@ -237,7 +295,9 @@ export function animate(id, deltas, duration = 0, opts = {}) {
     }
 
     const objects = matchedObjects("animate()", id);
-    pushTweens(objects, Object.keys(deltas), (target, key, from) => from + deltas[key], duration, easing);
+    const reverse = resolveReverseOpts(opts);
+    const reverseEasing = reverse.reverse && reverse.reverseMirror ? resolveEasing(opts, true) : easing;
+    pushTweens(objects, Object.keys(deltas), (target, key, from) => from + deltas[key], duration, easing, reverse, reverseEasing);
 }
 
 // Set-prop tween: like animate(), but targets are absolute values.
@@ -268,6 +328,8 @@ export function moveTo(id, targets, duration = 0, opts = {}) {
 
     const ids = toIdArray(id);
     const objects = matchedObjects("moveTo()", id);
+    const reverse = resolveReverseOpts(opts);
+    const reverseEasing = reverse.reverse && reverse.reverseMirror ? resolveEasing(opts, true) : easing;
 
     for (const key of Object.keys(targets)) {
         if (key !== "posX" && key !== "posY" && !objects.some((target) => target[key] !== undefined))
@@ -285,8 +347,17 @@ export function moveTo(id, targets, duration = 0, opts = {}) {
             return targets[key] - (key === "posX" ? center.x : center.y);
         }
 
+        if (key === "fontSize") {
+            // Keep a style-markup fontSize multiplier relative: renderer applies
+            // tw.fontSize * segFontSizeMultiplier on top of obj.fontSize, so the
+            // stored offset must be in base-font-size units, i.e. target minus
+            // the base font size, not the rendered segment size.
+            const multiplier = target.segFontSizeMultiplier ?? 1;
+            return targets[key] - target[key] / multiplier;
+        }
+
         return targets[key] - target[key];
-    }, duration, easing);
+    }, duration, easing, reverse, reverseEasing);
 }
 
 // Tween the color of every visual event sharing a queried id to `color`.
@@ -295,6 +366,8 @@ export function recolor(id, color, duration = 0, opts = {}) {
     validateDuration(duration);
 
     const easing = resolveEasing(opts);
+    const reverse = resolveReverseOpts(opts);
+    const reverseEasing = reverse.reverse && reverse.reverseMirror ? resolveEasing(opts, true) : easing;
     const to = parseColor(color);
     const ids = toIdArray(id);
 
@@ -319,6 +392,18 @@ export function recolor(id, color, duration = 0, opts = {}) {
 
         colorTweens.set(event, tween);
         visual.push(tween);
+
+        // Mirror color back to its start value after a delay, into `visual` only.
+        if (reverse.reverse) {
+            visual.push({
+                type: "tween",
+                target: event,
+                color: {from: tween.color.to, to: tween.color.from},
+                start: tween.tweenEnd + reverse.reverseDelay,
+                tweenEnd: tween.tweenEnd + reverse.reverseDelay + duration,
+                easing: reverseEasing
+            });
+        }
         matched++;
     });
 
@@ -345,6 +430,8 @@ export function rotateAround(id, center, angle, duration = 0, opts = {}) {
     validateDuration(duration);
 
     const easing = resolveEasing(opts);
+    const reverse = resolveReverseOpts(opts);
+    const reverseEasing = reverse.reverse && reverse.reverseMirror ? resolveEasing(opts, true) : easing;
     const ids = toIdArray(id);
     const objects = matchedObjects("rotateAround()", id);
     const pivot = center ?? getGroupCenter(ids);
@@ -371,5 +458,17 @@ export function rotateAround(id, center, angle, duration = 0, opts = {}) {
 
         chainOf(target).set("orbit", orbit);
         visual.push(orbit);
+
+        // Mirror the orbit back to its start angle after a delay, into `visual` only.
+        if (reverse.reverse) {
+            visual.push({
+                type: "tween",
+                target,
+                orbit: {cx: pivot.x, cy: pivot.y, dx, dy, r0, fromAngle: orbit.orbit.toAngle, toAngle: orbit.orbit.fromAngle},
+                start: orbit.tweenEnd + reverse.reverseDelay,
+                tweenEnd: orbit.tweenEnd + reverse.reverseDelay + duration,
+                easing: reverseEasing
+            });
+        }
     }
 }

@@ -30,3 +30,5 @@ export const assetMap = new Map();
 let autoId = -1;
 
 export function nextAutoId() {return autoId--;}
+
+export function currentAutoId() {return autoId;}

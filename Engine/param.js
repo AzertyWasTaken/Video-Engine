@@ -27,10 +27,11 @@ export const Param = {
 
         maxWidth: Infinity, // Line-wrap threshold (pixels)
         balancedWidth: false, // Balanced text width
+        widthStep: 1,
         autoSize: false, // Fit text on one line within maxWidth
         fontSizeStep: 1, // Font-size rounding step for autoSize (pixels)
 
-        styleSymbol: [], // Style markup entries [{openSymbol, closeSymbol?, color?, fontWeight?, fontFamily?, italic?}]
+        styleSymbol: [], // Style markup entries with optional color, font, and fontSize/offsetY overrides (relative to fontSize)
         segmentSymbol: null, // Enable segment splitting with selected symbol
         escapeSymbol: null, // Enable escaping special characters with selected symbol
 
@@ -38,30 +39,27 @@ export const Param = {
         autoSetPosY: false, // Auto-increment posY for chained texts
 
         flashDuration: 0, // Flash duration on newly spawned text (disabled if 0)
-        flashColor: "#FFFF00", // Flash color on newly spawned text
-
-        onTextSegment: () => {}, // Callback per segment (textLength) => void
+        flashColor: "#808080", // Flash color on newly spawned text
     },
 
     line: {
         positions: [{x: -0.5, y: -0.5}, {x: 0.5, y: 0.5}],
         scaleX: 1,
         scaleY: 1,
-        lineWidth: 16,
-        loop: false, // Close the path: stroke back from the last vertex to the first
+        lineWidth: 20,
         color: "#FFFFFF",
     },
 
     rect: {
-        width: 256,
-        height: 256,
+        width: 320,
+        height: 320,
         color: "#FFFFFF",
         strokeColor: null, // Stroke color; null disables the stroke
         strokeWidth: 4, // Stroke width in pixels
     },
 
     circle: {
-        diameter: 40,
+        diameter: 80,
         arc: 360, // Arc sweep in clockwise degrees from 12 o'clock (360 = full circle)
         color: "#FFFFFF",
         strokeColor: null, // Stroke color; null disables the stroke
@@ -69,9 +67,18 @@ export const Param = {
     },
 
     image: {
-        width: 256,
-        height: 256,
+        width: 320,
+        height: 320,
         src: "",
+    },
+
+    shape: {
+        positions: [{x: -0.5, y: -0.5}, {x: 0.5, y: 0.5}],
+        scaleX: 1,
+        scaleY: 1,
+        color: "#FFFFFF",
+        strokeColor: null, // Stroke color; null disables the stroke
+        strokeWidth: 4, // Stroke width in pixels
     },
 
     addon: {}

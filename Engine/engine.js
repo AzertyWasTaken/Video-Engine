@@ -1,12 +1,12 @@
 "use strict";
 import {Param, effectiveParam, assertKnownKeys, suggestSimilar} from "./param.js";
-import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId} from "./state.js";
+import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId, currentAutoId} from "./state.js";
 import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
 import {setAssets as setAssetMap, getAssets as getAssetMap} from "./assets.js";
 import {getGroupCenter, getGroupSize, pushVisual as pushVisualEvent} from "./visualEvents.js";
 import {addChapter as pushChapter, runScene as runSceneEvent, chapterTimestamps} from "./chapters.js";
 import {animate as applyAnimate, moveTo as applyMoveTo, recolor as applyRecolor, rotateAround as applyRotateAround, getPropertyOffset} from "./tweens.js";
-import {newText as createText} from "./textEvents.js";
+import {newText as createText, newTexts as createTexts} from "./textEvents.js";
 
 // Per-type checkpoint stacks for saveParam() / undoParam().
 const propCheckpoints = new Map();
@@ -66,12 +66,12 @@ export const Engine = {
                 && (latest === null || event.end > latest)) latest = event.end;
         }
 
-        if (latest !== null) advanceTime(latest - now);
+        if (latest !== null) setTime(latest);
     },
 
     // ---- Param defaults ----
 
-    saveParam(type = "text") {
+    saveParam(type = "global") {
         requireType(type);
 
         const stack = propCheckpoints.get(type) ?? [];
@@ -79,7 +79,7 @@ export const Engine = {
         propCheckpoints.set(type, stack);
     },
 
-    undoParam(type = "text") {
+    undoParam(type = "global") {
         requireType(type);
 
         const stack = propCheckpoints.get(type);
@@ -113,17 +113,17 @@ export const Engine = {
         }
     },
 
-    getGlobalProp(type = "text") {
+    getGlobalProp(type = "global") {
         requireType(type);
         return Param[type];
     },
 
-    getProp(key, type = "text") {
+    getProp(key, type = "global") {
         requireType(type);
         return effectiveParam(type, key);
     },
 
-    setProp(newProp, type = "text") {
+    setProp(newProp, type = "global") {
         requireType(type);
         assertKnownKeys(type, newProp, "setProp()");
 
@@ -142,7 +142,7 @@ export const Engine = {
         }
     },
 
-    changeProp(newProp, type = "text") {
+    changeProp(newProp, type = "global") {
         requireType(type);
         assertKnownKeys(type, newProp, "changeProp()");
 
@@ -216,7 +216,12 @@ export const Engine = {
 
     newText(newProp) {return createText(newProp);},
 
+    // Batch-create multiple text events with automatic vertical spacing.
+    newTexts(texts, configs) {return createTexts(texts, configs);},
+
     newLine(newProp) {return pushVisualEvent("line", newProp, "newLine()");},
+
+    newShape(newProp) {return pushVisualEvent("shape", newProp, "newShape()");},
 
     newRect(newProp) {return pushVisualEvent("rect", newProp, "newRect()");},
 
@@ -228,7 +233,11 @@ export const Engine = {
 
     chapter(name) {return pushChapter(name);},
 
-    scene(name, fn, opts) {return runSceneEvent(name, fn, opts);},
+    scene(name, fn, opts) {
+        const chapter = runSceneEvent(name, fn, opts);
+        this.waitUntilIdle();
+        return chapter;
+    },
 
     getChapters() {return chapters;},
 
@@ -258,9 +267,14 @@ export const Engine = {
         if (typeof opts !== "object" || opts === null)
             throw new Error(`setText() expects an options object, got ${typeof opts}.`);
 
-        const {fade = 0, hold = 0} = opts;
+        const {fade = 0, align = 0.5, hold = 0, fontSize} = opts;
         validateDuration(fade);
         validateDuration(hold);
+
+        if (fontSize !== undefined) {
+            if (typeof fontSize !== "number" || !Number.isFinite(fontSize) || fontSize <= 0)
+                throw new Error(`setText() fontSize must be a finite number greater than 0, got ${fontSize}.`);
+        }
 
         // Tween events target the old segment events, so bake their current
         // offsets into the replacement props - otherwise the new text snaps
@@ -278,9 +292,13 @@ export const Engine = {
             }
         }
 
-        Engine.clear(id, fade);
-        advanceTime(-fade);
+        // Explicit fontSize option overrides the baked (tweened) value.
+        if (fontSize !== undefined) baked.fontSize = fontSize;
 
+        advanceTime(fade * align);
+        Engine.clear(id, fade);
+
+        advanceTime(-fade);
         Engine.newText({
             ...stored,
             ...baked,
@@ -291,7 +309,6 @@ export const Engine = {
             fadeIn: fade,
             hold
         });
-
         advanceTime(fade);
     },
 
@@ -333,8 +350,24 @@ export const Engine = {
 
         visual.forEach((value) => {
             if (matchesIds(value, ids)) {
-                if (value.end === undefined || value.end > now) value.end = now;
-                if (typeof fading === "number") value.fadeOut = fading;
+                if (value.end === undefined || value.end > now) {
+                    value.end = now;
+                    if (typeof fading === "number") value.fadeOut = fading;
+                }
+            }
+        });
+    },
+
+    clearAll(ignoreId, fading) {
+        const ids = toIdArray(ignoreId);
+        const now = getTime();
+
+        visual.forEach((value) => {
+            if (!matchesIds(value, ids)) {
+                if (value.end === undefined || value.end > now) {
+                    value.end = now;
+                    if (typeof fading === "number") value.fadeOut = fading;
+                }
             }
         });
     },
@@ -362,5 +395,33 @@ export const Engine = {
 
     getDuration() {return getTime();},
 
-    getNextId() {return nextAutoId();}
+    // Repeat fn() for `seconds`, advancing the time cursor accordingly.
+    // Each iteration starts at the current cursor time. Useful for looping
+    // animations without manual wait()/newText() cycles.
+    repeat(count, fn) {
+        if (typeof count !== "number" || !Number.isFinite(count) || count < 0)
+            throw new Error(`repeat() expects a non-negative finite number of seconds, got ${count}.`);
+        if (typeof fn !== "function")
+            throw new Error("repeat() expects a callback function.");
+
+        for (let i = 0; i < count; i++) fn(i);
+    },
+
+    repeatGrid(rows, columns, fn) {
+        if (typeof rows !== "number" || !Number.isFinite(rows) || rows < 0)
+            throw new Error(`repeat() expects a non-negative finite number of seconds, got ${rows}.`);
+        if (typeof columns !== "number" || !Number.isFinite(columns) || columns < 0)
+            throw new Error(`repeat() expects a non-negative finite number of seconds, got ${columns}.`);
+        if (typeof fn !== "function")
+            throw new Error("repeat() expects a callback function.");
+
+        for (let x = 0; x < rows; x++)
+            for (let y = 0; y < columns; y++) fn(x, y);
+    },
+
+    // Return the next auto-assigned id (negative integer). Useful when you
+    // want to pre-assign an id before creating an event.
+    getNextId() {return nextAutoId();},
+
+    getCurrentId() {return currentAutoId();}
 };

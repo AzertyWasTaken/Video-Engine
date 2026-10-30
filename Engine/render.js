@@ -12,6 +12,16 @@ let cachedVisualRef = null;
 let cachedVisualLength = -1;
 let cachedSortedEvents = null;
 
+// Drop the cached sort. Events are only pushed during normal use, so the
+// length check below already catches new events; this is for the case where
+// the array contents are replaced in place and the length stays the same.
+export function resetRenderCache() {
+    cachedVisualRef = null;
+    cachedVisualLength = -1;
+    cachedSortedEvents = null;
+    sortedHasLayoutOrder = false;
+}
+
 // True while any cached event carries a non-zero layoutOrder:
 // only then does render() reorder the active set (stable sort,
 // so equal values keep their creation/start order). Tween and
@@ -259,7 +269,7 @@ export function render(visual, t) {
                 ctx.fillStyle = obj.fontColor;
             }
 
-            const fontSize = obj.fontSize + (tw?.fontSize ?? 0);
+            const fontSize = obj.fontSize + (tw?.fontSize ?? 0) * (obj.segFontSizeMultiplier ?? 1);
             let textX = posX;
             let textY = posY;
 
@@ -327,11 +337,34 @@ export function render(visual, t) {
                 ctx.moveTo(posX + positions[0].x * scaleX, posY + positions[0].y * scaleY);
                 for (let i = 1; i < positions.length; i++)
                     ctx.lineTo(posX + positions[i].x * scaleX, posY + positions[i].y * scaleY);
-                // loop closes the path: one extra segment back to the first vertex
-                if (obj.loop) ctx.closePath();
                 ctx.lineWidth = obj.lineWidth + (tw?.lineWidth ?? 0);
                 ctx.strokeStyle = colorOverride ?? obj.color;
                 ctx.stroke();
+            }
+        }
+        else if (obj.type === "shape") {
+            const positions = obj.positions;
+            if (positions.length >= 2) {
+                const scaleX = obj.scaleX + (tw?.scaleX ?? 0);
+                const scaleY = obj.scaleY + (tw?.scaleY ?? 0);
+
+                ctx.beginPath();
+                ctx.moveTo(posX + positions[0].x * scaleX, posY + positions[0].y * scaleY);
+                for (let i = 1; i < positions.length; i++)
+                    ctx.lineTo(posX + positions[i].x * scaleX, posY + positions[i].y * scaleY);
+                ctx.closePath();
+
+                const fillColor = colorOverride ?? obj.color;
+                if (fillColor !== null) {
+                    ctx.fillStyle = fillColor;
+                    ctx.fill();
+                }
+
+                if (obj.strokeColor) {
+                    ctx.lineWidth = obj.strokeWidth + (tw?.strokeWidth ?? 0);
+                    ctx.strokeStyle = colorOverride ?? obj.color;
+                    ctx.stroke();
+                }
             }
         }
         else if (obj.type === "image") {

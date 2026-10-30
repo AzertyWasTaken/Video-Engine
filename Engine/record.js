@@ -1,6 +1,8 @@
 "use strict";
 import path from "path";
 import {spawn} from "child_process";
+import fs from "fs";
+import {execFileSync} from "child_process";
 import {render, setCanvas, getPixelSize, loadImageAsset} from "./render.js";
 import {ffmpegPath, resolveCallerPath, assertFFmpegExists} from "./utils.js";
 import {resolveAsset} from "./assets.js";
@@ -24,6 +26,110 @@ function getFFMPEG(CONFIG, pixelWIDTH, pixelHEIGHT, outputFile) {
     ]);
 }
 
+// Resolve chapter name and edit flag from opts, accepting several spellings.
+// - chapter / chapterName: which chapter to render (clip only, existing behavior)
+// - editChapter / replaceChapter / patchChapter / updateChapter: chapter name + edit implied
+// - edit / replace / patch / merge / splice / update (boolean true): enable splice mode
+// - edit as a string: doubles as the chapter name (implies edit)
+function resolveEditOpts(opts) {
+    const nameKeys = ["chapter", "chapterName"];
+    const editNameKeys = ["editChapter", "replaceChapter", "patchChapter", "updateChapter"];
+    const flagKeys = ["edit", "replace", "patch", "merge", "splice", "update"];
+
+    let chapterName = undefined;
+    let edit = false;
+
+    for (const key of nameKeys) {
+        const value = opts[key];
+        if (value !== undefined && typeof value === "string" && value.length > 0) {
+            chapterName = value;
+            break;
+        }
+    }
+
+    for (const key of editNameKeys) {
+        const value = opts[key];
+        if (value !== undefined && typeof value === "string" && value.length > 0) {
+            chapterName = value;
+            edit = true;
+            break;
+        }
+    }
+
+    // A string `edit` doubles as the chapter name (implies edit).
+    if (chapterName === undefined && typeof opts.edit === "string" && opts.edit.length > 0) {
+        chapterName = opts.edit;
+        edit = true;
+    }
+
+    for (const key of flagKeys) {
+        if (opts[key] === true) {
+            edit = true;
+            break;
+        }
+    }
+
+    return {chapterName, edit};
+}
+
+// Splice a chapter clip into the full video, replacing [start, end).
+// Writes to a temp file then atomically replaces the full output file.
+// Video-only: input 0 = full video, input 1 = chapter clip.
+function spliceVideo(fullFilePath, insertFilePath, start, end, duration, outputFile) {
+    if (!fs.existsSync(fullFilePath)) {
+        throw new Error(
+            `Cannot edit chapter: full video not found at "${fullFilePath}" - ` +
+            "run a full render first."
+        );
+    }
+
+    const tempFile = outputFile + ".tmp.mp4";
+    const chapterDuration = end - start;
+
+    const vParts = [];
+    const vLabels = [];
+    let partIndex = 0;
+
+    // Head: [0, start)
+    if (start > 0) {
+        vParts.push(`[0:v]trim=start=0:end=${start},setpts=PTS-STARTPTS[v${partIndex}]`);
+        vLabels.push(`[v${partIndex}]`);
+        partIndex++;
+    }
+
+    // Middle: chapter clip [0, chapterDuration)
+    vParts.push(`[1:v]trim=start=0:end=${chapterDuration},setpts=PTS-STARTPTS[v${partIndex}]`);
+    vLabels.push(`[v${partIndex}]`);
+    partIndex++;
+
+    // Tail: [end, duration)
+    if (end < duration) {
+        vParts.push(`[0:v]trim=start=${end},setpts=PTS-STARTPTS[v${partIndex}]`);
+        vLabels.push(`[v${partIndex}]`);
+        partIndex++;
+    }
+
+    const vConcat = vLabels.join("") + `concat=n=${vLabels.length}:v=1:a=0[v]`;
+    const filterComplex = vParts.join(";") + ";" + vConcat;
+
+    const ffmpegArgs = [
+        "-y",
+        "-i", fullFilePath,
+        "-i", insertFilePath,
+        "-filter_complex", filterComplex,
+        "-map", "[v]",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-pix_fmt", "yuv420p",
+        "-threads", "0",
+        tempFile
+    ];
+
+    execFileSync(ffmpegPath, ffmpegArgs, {stdio: "inherit"});
+    fs.renameSync(tempFile, outputFile);
+    return outputFile;
+}
+
 export async function record(CONFIG, visual, duration, callerPath, opts = {}) {
     const {WIDTH, HEIGHT, FPS, SCALE = 1} = CONFIG;
 
@@ -36,11 +142,22 @@ export async function record(CONFIG, visual, duration, callerPath, opts = {}) {
     const videoDir = path.dirname(resolvedPath);
     let outputFile = path.join(videoDir, "visual.mp4");
 
+    // Resolve chapter name and edit flag from opts.
+    const {chapterName, edit} = resolveEditOpts(opts);
+
+    if (edit && chapterName === undefined) {
+        throw new Error(
+            "edit mode requires a chapter name (e.g. {chapter: \"intro\", edit: true} " +
+            "or {editChapter: \"intro\"})."
+        );
+    }
+
     // Optional chapter window: render only the frames between its boundaries.
     let start = 0;
     let end = duration;
-    if (opts.chapter !== undefined) {
-        const chapter = findChapter(opts.chapter, duration);
+    let chapter = null;
+    if (chapterName !== undefined) {
+        chapter = findChapter(chapterName, duration);
         if (chapter.end <= chapter.start)
             throw new Error(`Chapter ${JSON.stringify(chapter.name)} has no length (start ${chapter.start}, end ${chapter.end}).`);
         start = chapter.start;
@@ -48,7 +165,7 @@ export async function record(CONFIG, visual, duration, callerPath, opts = {}) {
         outputFile = path.join(videoDir, chapterFileName("visual_", chapter.name));
     }
 
-    validateTimeline(visual, start, end, duration, opts.chapter);
+    validateTimeline(visual, start, end, duration, chapterName !== undefined);
 
     const totalFrames = Math.ceil(FPS * (end - start));
 
@@ -86,6 +203,13 @@ export async function record(CONFIG, visual, duration, callerPath, opts = {}) {
         });
         ffmpeg.on("error", reject);
     });
+
+    // Edit mode: splice the chapter clip back into the full video.
+    if (edit && chapter !== null) {
+        const fullVideoPath = path.join(videoDir, "visual.mp4");
+        spliceVideo(fullVideoPath, outputFile, start, end, duration, fullVideoPath);
+        console.log(`Chapter "${chapter.name}" edited into ${fullVideoPath}`);
+    }
 
     return outputFile;
 }
