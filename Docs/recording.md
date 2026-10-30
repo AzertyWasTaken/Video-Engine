@@ -80,6 +80,27 @@ addSounds(audio, duration, import.meta.url, {chapter: "intro"});
 - Audio events with a `start` inside the window are shifted into the clip; sounds that began before the chapter are dropped.
 - `renderVideo(CONFIG, callerPath, {audio: true, chapter: "intro"})` forwards the option to both calls.
 
+## Editing a single chapter
+
+Pass `{chapter: name, edit: true}` to both calls to re-render one chapter and splice it into the existing full `visual.mp4` / `audio.mp4`, without re-encoding the rest of the video:
+
+```js
+// 1. Full render (produces visual.mp4 + audio.mp4)
+await record(CONFIG, visual, duration, import.meta.url, {audio: true});
+addSounds(audio, duration, import.meta.url, {audio: true});
+
+// 2. Later: re-render just the "intro" chapter and splice it back in
+await record(CONFIG, visual, duration, import.meta.url, {chapter: "intro", edit: true});
+addSounds(audio, duration, import.meta.url, {chapter: "intro", edit: true});
+```
+
+- The chapter clip is rendered as `visual_<name>.mp4` / `audio_<name>.mp4`, then spliced into the full video at `[chapter.start, chapter.end)`.
+- The full `visual.mp4` / `audio.mp4` are replaced in place (atomically, via a temp file).
+- Edit mode requires the full render to exist first - it throws `"full video not found"` if `visual.mp4` / `audio.mp4` is missing.
+- Chapter names come from `_.chapter()` / `_.scene()` and must match exactly.
+- Alternative spellings are accepted: `{chapterName: "intro", edit: true}`, `{editChapter: "intro"}` (chapter name + edit implied), `{edit: true, chapter: "intro"}`, or `{edit: "intro"}` (string `edit` doubles as the chapter name).
+- The rest of the video is copied from the existing file - only the chapter window is re-encoded.
+
 ## FFmpeg configuration
 
 Both modules resolve the executable as:

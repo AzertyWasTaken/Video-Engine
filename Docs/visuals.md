@@ -2,11 +2,11 @@
 
 > Part of the [Anim documentation](../README.md#documentation).
 
-Visuals are created with `_.newLine()`, `_.newCircle()`, `_.newRect()`, `_.newImage()`, and `_.setBackgroundColor()`. Defaults for each type live in `Engine/param.js` and can be changed via `_.setProp(newProp, type)`.
+Visuals are created with `_.newLine()`, `_.newCircle()`, `_.newRect()`, `_.newShape()`, `_.newImage()`, and `_.setBackgroundColor()`. Defaults for each type live in `Engine/param.js` and can be changed via `_.setProp(newProp, type)`.
 
 ## Common properties (object creators)
 
-Every object creator (`_.newText()`, `_.newLine()`, `_.newCircle()`, `_.newRect()`, and `_.newImage()`) accepts these properties and **returns the group's ids (array)**. Their defaults live in the shared `global` section of `Engine/param.js` - change them for all unset types at once with `_.setProp(props, "global")`. Background events are documented separately below.
+Every object creator (`_.newText()`, `_.newLine()`, `_.newCircle()`, `_.newRect()`, `_.newShape()`, and `_.newImage()`) accepts these properties and **returns the group's ids (array)**. Their defaults live in the shared `global` section of `Engine/param.js` - change them for all unset types at once with `_.setProp(props, "global")`. Background events are documented separately below.
 
 | Property | Default | Description |
 | - | - | - |
@@ -29,7 +29,6 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 | `scaleX` | `1` | Horizontal multiplier applied to every vertex offset (`lineWidth` is unaffected); tweenable |
 | `scaleY` | `1` | Vertical multiplier applied to every vertex offset; tweenable |
 | `lineWidth` | `16` | Stroke width in pixels |
-| `loop` | `false` | Close the path: strokes one extra segment from the last vertex back to the first. Needs at least 3 `positions` - a build-time error is thrown otherwise |
 | `color` | `"#FFFFFF"` | Line color (any CSS color string) |
 
 ## Rectangle properties (`type: "rect"`)
@@ -54,6 +53,19 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 
 > **Rendering note:** `render.js` passes `diameter` directly as the canvas arc *radius*, so the drawn circle's radius equals the `diameter` value (visual size = 2 x `diameter`).
 
+## Shape properties (`type: "shape"`)
+
+A closed path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex `{x, y}` in `positions` (an omitted axis defaults to `0`), filled with `color` and optionally stroked with `strokeColor`/`strokeWidth`. Fewer than 2 vertices draw nothing.
+
+| Property | Default | Description |
+| - | - | - |
+| `positions` | `[{x: -0.5, y: -0.5}, {x: 0.5, y: 0.5}]` | Array of vertex objects, each relative to `posX`/`posY`; consecutive vertices form the polygon and the path closes back to the first vertex. **Each axis is optional and defaults to `0`**, so `{x: 120}` and `{y: -60}` are valid vertices |
+| `scaleX` | `1` | Horizontal multiplier applied to every vertex offset (`strokeWidth` is unaffected); tweenable |
+| `scaleY` | `1` | Vertical multiplier applied to every vertex offset; tweenable |
+| `color` | `"#FFFFFF"` | Fill color (any CSS color string); `null` disables fill |
+| `strokeColor` | `null` | Stroke color; `null` disables the stroke |
+| `strokeWidth` | `4` | Stroke width in pixels |
+
 ## Image properties (`type: "image"`)
 
 | Property | Default | Description |
@@ -74,7 +86,8 @@ All events pushed to the visual timeline share this structure (`start` is set to
 | `"text"` | `ids`, `text`, `posX`, `posY`, `rotation`, `anchorX`, `anchorY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `italic`, `flashDuration`, `flashColor`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Rendered text segment |
 | `"circle"` | `ids`, `posX`, `posY`, `rotation`, `diameter`, `arc`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Filled circle (optional stroke), or a pie wedge when `arc` is below `360` |
 | `"rect"` | `ids`, `posX`, `posY`, `rotation`, `width`, `height`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Filled rectangle (optional stroke) |
-| `"line"` | `ids`, `posX`, `posY`, `rotation`, `positions`, `scaleX`, `scaleY`, `lineWidth`, `loop`, `color`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Stroked polyline (closed when `loop` is set) |
+| `"line"` | `ids`, `posX`, `posY`, `rotation`, `positions`, `scaleX`, `scaleY`, `lineWidth`, `color`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Stroked polyline |
+| `"shape"` | `ids`, `posX`, `posY`, `rotation`, `positions`, `scaleX`, `scaleY`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Closed filled polygon with optional stroke |
 | `"image"` | `ids`, `src`, `posX`, `posY`, `rotation`, `width`, `height`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Image overlay |
 | `"tween"` | `target`, `key`/`color`, `from`, `to`, `start`, `tweenEnd`, `easing`, `end?` | Animation event; resolved by the renderer, never drawn |
 
@@ -83,14 +96,15 @@ All events pushed to the visual timeline share this structure (`start` is set to
 - **Text** - centered at `(width / 2 + posX, height / 2 + posY)`
 - **Rect** - top-left corner at `(width - w) / 2 + posX, (height - h) / 2 + posY`
 - **Circle** - arc centered at `(width / 2 + posX, height / 2 + posY)` (see the note above); the arc starts at 12 o'clock and sweeps clockwise by `arc` degrees. Alignment and `centerText()` / `getSize()` still use the full-circle bounding box (`±diameter / 2`)
-- **Line** - path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex `{x, y}` in `positions` (an omitted axis is `0`), stroked with `lineWidth`; `loop` closes the path back to the first vertex, which stays inside the vertex bounding box so alignment and centering are unaffected
+- **Line** - path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex `{x, y}` in `positions` (an omitted axis is `0`), stroked with `lineWidth`.
+- **Shape** - closed path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex `{x, y}` in `positions` (an omitted axis is `0`), filled with `color` and optionally stroked with `strokeColor`/`strokeWidth`. Alignment and `centerText()` / `getSize()` use the scaled vertex box plus half `strokeWidth`.
 - **Image** - top-left corner like rect, drawn from the image cache keyed on the original `src`
-- **Alignment** - `alignX`/`alignY` shift the element by half its bounding box to that side of the anchor: text lines shift by half the line width, the text block by half its total height, shapes by half their `width`/`height` or `diameter`, lines by their scaled vertex box plus `lineWidth`
+- **Alignment** - `alignX`/`alignY` shift the element by half its bounding box to that side of the anchor: text lines shift by half the line width, the text block by half its total height, rects/shapes/circles by half their box (`width`/`height`, vertex box, or `diameter`), lines by their scaled vertex box plus `lineWidth`
 - **Rotation** - `rotation` is a pure drawing transform applied around the anchor, in clockwise degrees. It is a **visual rotation only**: `width`/`height`/`positions` stay unrotated, so the bounding box used by `centerText()` / `getSize()` and the `alignX`/`alignY` baking is still the unrotated one. Text pivots on its layout anchor (`anchorX`/`anchorY`, i.e. the text config's `posX`/`posY`), so a multi-segment or multi-line block turns as one unit instead of each segment spinning in place; every other type pivots on its own `posX`/`posY`, which is already its bounding-box center - so a rotated object's group center does not move. Objects with `rotation: 0` (the default) skip the canvas transform entirely.
 
 ## Grouping & centering
 
-`_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events sharing a queried id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id or an array of ids; each call affects every matching object exactly once. Works for text, rects, circles, lines, and images.
+`_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events sharing a queried id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id or an array of ids; each call affects every matching object exactly once. Works for text, rects, circles, shapes, lines, and images.
 
 ## Layout order
 

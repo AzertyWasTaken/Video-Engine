@@ -6,7 +6,7 @@ Text is created with `_.newText(newProp)` and rendered by `Engine/render.js`. Th
 
 For default-property helpers (`setProp`, `changeProp`, checkpoints), see [engine-api.md](./engine-api.md).
 
-`_.newText()` returns the group's ids (array). Common properties shared by all creators (`id`, `duration`, `posX`/`posY`, `rotation`, `fadeIn`/`fadeOut`, `opacity`) are listed in [visuals.md](./visuals.md#common-properties-object-creators).
+`_.newText()` returns the group's ids (array). When `segmentSymbol` splits text into two or more segments, it returns an object `{id, textId, parts, partIds, ids}` with distinct automatic ids per segment. Common properties shared by all creators (`id`, `duration`, `posX`/`posY`, `rotation`, `fadeIn`/`fadeOut`, `opacity`) are listed in [visuals.md](./visuals.md#common-properties-object-creators).
 
 ## Text configuration properties
 
@@ -34,15 +34,6 @@ Properties passed directly to `_.newText({...})` are merged on top of the persis
 | `flashColor` | `"#FFFF60"` | Flash color on newly spawned text |
 | `autoSetPosX` | `false` | Auto-increment `posX` for chained `newText` calls |
 | `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
-| `onTextSegment` | `() => {}` | Callback `(textLength) => void`. Fires when a `"wait"` marker is encountered, and once more at the end of `newText()` with the remaining accumulated length. |
-
-Common segment-delay helper:
-
-```js
-function textDelay(length) {
-    return Math.floor(length / 12 + 2) / 2;
-}
-```
 
 ## Text markup
 
@@ -50,7 +41,7 @@ Each markup type is enabled by setting its symbol property - globally via `_.set
 
 ### Style markup (`styleSymbol`)
 
-`styleSymbol` is a list of entries `{openSymbol, closeSymbol?, color?, fontWeight?, fontFamily?, italic?}`. Each entry chooses the symbols that open and close its styled region; `closeSymbol` defaults to `openSymbol`, which makes the entry a toggle.
+`styleSymbol` is a list of entries `{openSymbol, closeSymbol?, color?, fontWeight?, fontFamily?, italic?, fontSize?, offsetY?}`. Each entry chooses the symbols that open and close its styled region; `closeSymbol` defaults to `openSymbol`, which makes the entry a toggle. `fontSize` and `offsetY` are multipliers relative to the text's base `fontSize`, so they scale naturally as the text resizes: `fontSize` overrides the rendered size (used when measuring text for wrapping) and `offsetY` shifts that styled region vertically by `offsetY * fontSize` pixels without moving its line.
 
 ```js
 _.setProp({
@@ -59,6 +50,8 @@ _.setProp({
         {openSymbol: "/", italic: true},                        // /italic/
         {openSymbol: "{f ", closeSymbol: "}", fontFamily: "Times New Roman"},  // {f Times}
         {openSymbol: "{y ", closeSymbol: "}", color: "#FFE040"},  // {y yellow}
+        {openSymbol: "{s ", closeSymbol: "}", fontSize: 1.5},    // {s larger}
+        {openSymbol: "{u ", closeSymbol: "}", offsetY: -0.25},   // {u raised}
     ],
 });
 ```
@@ -66,6 +59,8 @@ _.setProp({
 - `*bold text*` renders with `fontWeight: 700`
 - `/italic text/` renders italic; the same entry with `italic: false` turns italic **off** inside italic base text
 - `{f Times}` switches `fontFamily` for that region only, restoring the base family afterwards
+- `{s larger}` renders that region at 1.5× the base fontSize (120 px) and accounts for its size while wrapping
+- `{u raised}` shifts that region up by 0.25× the base fontSize (20 px) without moving its line
 - Omitted fields keep the base style
 - One entry can set several fields at once (`{openSymbol: "{f ", closeSymbol: "}", fontFamily: "Georgia", italic: true}`)
 - Styles stack and can be nested
@@ -84,14 +79,15 @@ When two entries could match at the same position, the longest symbol wins (`**`
 
 ### Segment splitting (`segmentSymbol`)
 
-Each line is split by the symbol into timed chunks. `onTextSegment` fires after each chunk - typically to play a click sound and wait:
+Each line is split by the symbol into timed chunks. When `segmentSymbol` produces two or more segments, each segment becomes a distinct part with its own automatic id. `newText()` returns an object `{id, textId, parts, partIds, ids}` so you can animate individual parts:
 
 ```js
-onTextSegment: (textLength) => {
-  _.playSound("click", 2);
-  _.wait(Math.floor(textLength / 12 + 2) / 2);
-}
+const result = _.newText({text: "Split; into; parts"});
+// result.partIds === [id1, id2, id3]
+_.moveTo(result.partIds[0], {posX: -100}, 0.5);
 ```
+
+Segment ids appear *only* when the text splits into two or more parts; single-segment text returns the group ids unchanged.
 
 ### Escaping special characters (`escapeSymbol`)
 
@@ -113,7 +109,7 @@ _.newText({text: "First line.\nSecond line."});
 
 - Newlines are not markup symbols - they work with every configuration and cannot be disabled.
 - Consecutive newlines collapse: blank lines create no vertical gap.
-- Style state (`color`/`fontWeight`/`fontFamily`/`italic`) carries across breaks.
+- Style state (`color`/`fontWeight`/`fontFamily`/`italic`/`fontSize`/`offsetY`) carries across breaks.
 - `lineGap` adds extra space between lines, for both hard breaks and `maxWidth` wrapping.
 
 ### Automatic sizing
@@ -149,13 +145,13 @@ _.newText({text: "This has a ; that should not split.", segmentSymbol: null});
 ## Rendering pipeline
 
 1. Input text string
-2. `tokenizeText()` (`textParser.js`) - parse style and escape markers into tokens `[{text, color, fontWeight, fontFamily, italic}, ...]`
+2. `tokenizeText()` (`textParser.js`) - parse style and escape markers into tokens `[{text, color, fontWeight, fontFamily, italic, fontSize, offsetY}, ...]` (`fontSize`/`offsetY` are styleSymbol multipliers relative to the base `fontSize`)
 3. `chunkTokens()` - split tokens into word/space chunks, emitting `{break: true}` markers at `\n` characters
 4. Auto-sizing (when enabled) - remove hard-break markers, measure visible segments, and binary-search the largest positive `fontSizeStep` multiple that fits `maxWidth`
 5. `splitLines()` - measure widths and wrap at `maxWidth` (trailing spaces removed; break markers flush the current line; `balancedWidth` re-wraps with a reduced width)
 6. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, color, fontWeight, fontFamily, italic}, ...]`
-7. `pushTextLine()` (`textEvents.js`) - measure segments, compute x-positions (centered, then shifted by `alignX`), push visual events; calls `prop.onTextSegment(textLength)` at each `"wait"` marker
-8. `newText()` (`textEvents.js`) - calls `prop.onTextSegment(textLength)` once at the end with the remaining accumulated length
+7. `pushTextLine()` (`textEvents.js`) - measure segments, compute x-positions (centered, then shifted by `alignX`), push visual events; each segment part receives a distinct automatic id
+8. `newText()` (`textEvents.js`) - allocates a distinct id per segment part; returns an object when there are 2+ parts, otherwise returns the group ids (unchanged)
 9. `render.js` - draws each text event at `(width / 2 + posX, height / 2 + posY)` with `textAlign: center`, `textBaseline: middle`; a tweened `fontSize` rescales those positions about the text's `posX`/`posY` anchor (`anchorX`/`anchorY`), so segments and line spacing resize together (see [Resizing](#resizing))
 
 ## Size hierarchy

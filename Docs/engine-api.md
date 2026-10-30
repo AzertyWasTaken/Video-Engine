@@ -15,6 +15,16 @@ _.wait(sec)          // Advance the time cursor by `sec` seconds (0 if omitted)
 _.seek(t)            // Jump the time cursor to absolute time t (seconds)
 _.waitUntilIdle()    // Advance the cursor past the latest open event (no-op when none are open)
 _.getDuration()      // Total elapsed time (current time cursor value)
+_.repeat(count, fn)    // Repeat fn(i) count times
+```
+
+`_.repeat(seconds, fn)` runs `fn()` repeatedly, advancing the time cursor by small slices until `seconds` have elapsed. The cursor ends at `start + seconds`. Useful for looping animations without manual `wait()`/`newText()` cycles:
+
+```js
+_.repeat(2, () => {
+    _.newText({text: "tick", duration: 0.1});
+    _.wait(0.4);
+});
 ```
 
 ## Time model
@@ -53,7 +63,7 @@ _.getChapterTimestamps()           // Video-description lines "00:00 Intro - 00:
 ```
 
 - `chapter(name)` closes the previous chapter at the current time and pushes `{name, start, end: null}`. Names must be unique and non-empty (duplicate names throw).
-- `scene(name, fn, opts)` is `chapter(name)` + `fn()` + closing the chapter at whatever the cursor reached (`end` is set even when `fn()` throws, then the error rethrows). `opts.pad` (default `0`) advances the cursor before the scene starts - breathing room between scenes. Returns the chapter entry.
+- `scene(name, fn, opts)` is `chapter(name)` + `fn()` + closing the chapter at whatever the cursor reached (`end` is set even when `fn()` throws, then the error rethrows). After `fn()` returns, `waitUntilIdle()` is called automatically so open-ended events (e.g. with `duration`) end cleanly. `opts.pad` (default `0`) advances the cursor before the scene starts - breathing room between scenes. Returns the chapter entry.
 
 ```js
 _.scene("intro", () => {
@@ -67,11 +77,11 @@ Scenes are a naming/marking layer only: the time cursor and `Param` defaults sta
 
 `_.getChapterTimestamps()` formats chapters as `mm:ss` lines (`h:mm:ss` past one hour) for video descriptions; an open last chapter resolves against the current time cursor.
 
-`record()` / `addSounds()` take a `{chapter: name}` option to render a single chapter - see [recording.md](./recording.md#recording-a-single-chapter).
+`record()` / `addSounds()` take a `{chapter: name}` option to render a single chapter - see [recording.md](./recording.md#recording-a-single-chapter). Add `edit: true` to splice the chapter back into the full video without re-encoding the rest - see [recording.md](./recording.md#editing-a-single-chapter).
 
 ## Ids & return values
 
-Visual creators (`newText`, `newLine`, `newRect`, `newCircle`, `newImage`) **return the group's ids as an array**. The `id` property accepts a single id or an array of ids - an object created with several ids is affected by every function called with any one of them. When `id` is omitted, a unique negative integer is auto-assigned:
+Visual creators (`newText`, `newLine`, `newShape`, `newRect`, `newCircle`, `newImage`) **return the group's ids as an array**. The `id` property accepts a single id or an array of ids - an object created with several ids is affected by every function called with any one of them. When `id` is omitted, a unique negative integer is auto-assigned:
 
 ```js
 const title = _.newText({text: "Hello"});        // [-1]
@@ -147,6 +157,7 @@ _.withProp({text: {fontSize: 60}, circle: {color: "#FFE040", diameter: 60}}, () 
 
 ```js
 _.newText(newProp)                       // Add a text event; returns the group ids (array)
+_.newTexts(configs)                      // Batch-create text events with automatic vertical spacing; returns array of ids
 _.setText(id, text, opts = {})           // Replace text of an existing id with a crossfade
 ```
 
@@ -175,7 +186,8 @@ A stored config must exist for one of the queried ids (`textProp` keeps the last
 
 ```js
 _.setBackgroundColor(color, opts = {})      // Add a background event at the current time
-_.newLine(newProp)                          // Polyline through positions (vertices relative to posX/posY, times scaleX/scaleY; loop closes the path)
+_.newLine(newProp)                          // Polyline through positions (vertices relative to posX/posY, times scaleX/scaleY)
+_.newShape(newProp)                         // Closed filled polygon through positions; optional stroke via strokeColor/strokeWidth
 _.newRect(newProp)                          // Rectangle centered at (posX, posY)
 _.newCircle(newProp)                        // Circle at (posX, posY); arc (< 360) draws a partial circle clockwise from 12 o'clock
 _.newImage(newProp)                         // Image overlay at (posX, posY)
@@ -189,7 +201,7 @@ _.getCenter(id)                              // Bounding-box center of the group
 - All creators accept `duration` (seconds until the event auto-ends) and **return the group's ids**.
 - `setBackgroundColor(color, opts)` accepts `{fadeIn, fadeOut, duration}`: the new color fades in over the previous background, `fadeOut` reverses the fade before the event ends, and a `duration` auto-ends it (the previous color shows again).
 - Every id argument accepts a single id or an array of ids; each call affects every object sharing any queried id exactly once (see [Ids & return values](#ids--return-values)).
-- `clear()` sets `end` to the current time on matching events that have not ended yet (`end` stays put on already-finished events); if `fadeOut` is given it overrides each event's `fadeOut`.
+- `clear()` sets `end` to the current time on matching events that have not ended yet (`end` stays put on already-finished events); if `fadeOut` is given it overrides the `fadeOut` of those events only. An event that already ended keeps its own `fadeOut`, so a later `clear()` cannot re-time a fade that already happened - a caption replaced by `setText()` keeps its own crossfade.
 - `centerText()` moves each axis independently - an axis is skipped when its argument is `null`. Works for text, rects, circles, lines, and images.
 - See [visuals.md](./visuals.md) for property tables, element types, and rendering geometry.
 
@@ -226,11 +238,33 @@ Rules:
 - A tweened `opacity` is combined with the object's `fadeIn`/`fadeOut` progress and clamped to `0`..`1`, so an overshooting easing (`back` / `elastic`) never draws out of range. `animate()` deltas are not range-checked (a delta's valid range depends on the value it starts from) - the clamp handles them.
 - `opts.easing` is one of `linear` (default), `quad`, `cubic`, `sin`, `expo`, `circ`, `back`, `elastic` (see `Engine/easing.js`), or a custom `(t) => easedT` function.
 - `opts.direction` shapes that curve: `"in"` (default, slow start), `"out"` (slow end), or `"inOut"` (slow start and end). Each curve is defined in its `in` form and the direction is applied to it, so `{easing: "quad", direction: "out"}` is the old `"quadOut"` and `{easing: "back", direction: "out"}` still overshoots on the way in. Any other direction throws.
+- `opts.reverse` (default `false`) auto-reverses a completed tween: after it reaches its end value it plays back to its start value over the same duration. `opts.reverseDelay` (default `0`) inserts that many seconds of hold before the reversal begins, so `{reverse: true, reverseDelay: 0.5}` holds the end value for half a second then eases back. `opts.reverseMirror` (default `false`) mirrors the easing **direction** on the reverse leg: `in` plays back as `out`, `out` as `in`, and `inOut` stays `inOut`. The forward leg always keeps the originally requested easing/direction. Applies to `animate()`, `moveTo()`, `recolor()`, and `rotateAround()`.
 - Tweens target every object that shares a queried id **at call time**, each exactly once, so multi-segment text stays aligned; objects created after the call are not affected by it. A tweened `fontSize` scales the whole text layout - segment spacing and line spacing included - about the text's `posX`/`posY` anchor, so `alignX`/`alignY` keep holding; only the wrapping (`maxWidth` line breaks) stays at the build-time layout.
 - Tweens **chain**: animating the same property again starts from where the previous tween is at the current time cursor and supersedes it - no snaps, no double-counting.
 - `recolor()` needs hex colors (`#RGB` / `#RRGGBB`) for the target color and for the events being recolored.
 - Elements must exist first: all four throw when no visual events share a queried id.
 - Tweens do not advance the time cursor - `wait()` through them to see them play.
+
+### `_.newTexts(configs)`
+
+Batch-create text events from an array of config objects. Each config is passed to `newText()`. When `posY` is omitted, texts stack vertically with `fontSize + lineGap` spacing:
+
+```js
+_.newTexts([
+    {text: "Line one"},
+    {text: "Line two", posY: 100},  // explicit position
+    {text: "Line three"}            // auto-positioned below Line two
+]);
+```
+
+### `_.getAutoId()`
+
+Returns the next auto-assigned negative id without consuming it:
+
+```js
+const id = _.getAutoId();   // e.g. -5
+_.newText({id, text: "Pre-assigned"});
+```
 
 ## Sound & assets
 
