@@ -1,7 +1,7 @@
 "use strict";
 import {getEasing} from "./easing.js";
 import {getTime, visual} from "./state.js";
-import {matchesIds, requireEvents, toIdArray, validateDuration, validateOpacity} from "./validate.js";
+import {idHintSuffix, matchesIds, requireEvents, showIds, toIdArray, unknownIdMessage, validateDuration, validateOpacity} from "./validate.js";
 import {getGroupCenter} from "./visualEvents.js";
 
 // Properties that can be tweened with animate() / moveTo().
@@ -64,15 +64,51 @@ function resolveReverseOpts(opts) {
     return {reverse: reverse === true, reverseMirror: mirror === true, reverseDelay: reverseDelay ?? 0};
 }
 
+// Value a tween leg holds at time t.
+function legValue(leg, t) {
+    const span = leg.tweenEnd - leg.start;
+    const p = span <= 0 ? 1 : Math.min(Math.max((t - leg.start) / span, 0), 1);
+
+    return leg.from + (leg.to - leg.from) * leg.easing(p);
+}
+
+// The leg that owns a value right now: the reverse leg once it has started
+// (the renderer lets the later leg overwrite the earlier one), else the leg
+// itself. A reverse leg belongs to the leg it mirrors, so it is stored on it.
+function ownedLeg(leg, now) {
+    if (!leg) return undefined;
+
+    const mirror = leg?.mirror;
+
+    const mainActive = tweenActive(leg, now);
+    const mirrorActive = mirror && now >= mirror.start && tweenActive(mirror, now);
+
+    if (mirrorActive) return mirror;
+    if (mainActive) return leg;
+
+    return undefined;
+}
+
+// The chain entry for one object and key, with its reverse leg applied.
+function activeLeg(target, key, now) {
+    return ownedLeg(propTweens.get(target)?.get(key), now);
+}
+
 // Value the current tween chain holds for one object on `key` at the time cursor.
 function chainValue(target, key) {
-    const tween = propTweens.get(target)?.get(key);
-    if (!tween) return 0;
+    const now = getTime();
+    const leg = activeLeg(target, key, now);
 
-    const span = tween.tweenEnd - tween.start;
-    const p = span <= 0 ? 1 : Math.min(Math.max((getTime() - tween.start) / span, 0), 1);
+    return leg ? legValue(leg, now) : 0;
+}
 
-    return tween.from + (tween.to - tween.from) * tween.easing(p);
+// Close a tween leg and the reverse leg it mirrors, so a superseded tween
+// cannot keep painting over the tween that replaced it.
+function closeLeg(leg, now) {
+    if (!leg) return;
+
+    leg.end = now;
+    if (leg.mirror) leg.mirror.end = now;
 }
 
 // True while a tween event still contributes at time t.
@@ -109,10 +145,12 @@ function orbitValue(orbit, target, key, t) {
 }
 
 // Current tweened offset of one object on a property (used by setText()).
-// An active orbit supersedes the linear chain on its keys.
+// An active orbit supersedes the linear chain on its keys. A reverse leg
+// counts once it has started, so a tween that already played back reports the
+// value it came back to instead of the peak it reached.
 export function getPropertyOffset(target, key) {
     const now = getTime();
-    const orbit = propTweens.get(target)?.get("orbit");
+    const orbit = activeLeg(target, "orbit", now);
     if (ORBIT_KEYS.has(key) && tweenActive(orbit, now))
         return orbitValue(orbit, target, key, now);
 
@@ -122,6 +160,9 @@ export function getPropertyOffset(target, key) {
 // Pin a value on a key by pushing a zero-span hold tween: the pose keeps
 // rendering (p clamps to 1) and later tweens chain from it.
 function holdValue(target, key, value, now) {
+    const chain = chainOf(target);
+    closeLeg(chain.get(key), now);
+
     const hold = {
         type: "tween",
         target,
@@ -133,7 +174,7 @@ function holdValue(target, key, value, now) {
         easing: (t) => t
     };
 
-    chainOf(target).set(key, hold);
+    chain.set(key, hold);
     visual.push(hold);
 }
 
@@ -143,10 +184,11 @@ function releaseOrbit(target, now) {
     const orbit = propTweens.get(target)?.get("orbit");
     if (!tweenActive(orbit, now)) return;
 
+    const active = activeLeg(target, "orbit", now);
     for (const key of ORBIT_KEYS)
-        holdValue(target, key, orbitValue(orbit, target, key, now), now);
+        holdValue(target, key, orbitValue(active, target, key, now), now);
 
-    orbit.end = now;
+    closeLeg(orbit, now);
 }
 
 // Close active linear posX/posY/rotation tweens on a target and hold their
@@ -160,7 +202,7 @@ function releasePositionTweens(target, now) {
         if (!tweenActive(prev, now)) continue;
 
         const value = chainValue(target, key);
-        prev.end = now;
+        closeLeg(prev, now);
         holdValue(target, key, value, now);
     }
 }
@@ -195,9 +237,8 @@ function pushTweens(objects, keys, toValue, duration, easing, reverse, reverseEa
             const chain = chainOf(target);
 
             const prev = chain.get(key);
-            if (prev) prev.end = now;
-
             const from = chainValue(target, key);
+            if (prev) closeLeg(prev, now);
 
             const tween = {
                 type: "tween",
@@ -215,9 +256,10 @@ function pushTweens(objects, keys, toValue, duration, easing, reverse, reverseEa
 
             // Mirror the tween backward after a delay so it auto-reverses to its
             // start value. Only into `visual` (the renderer overwrites by start
-            // order), never into `propTweens`.
+            // order), never into `propTweens`; the leg keeps a link to its
+            // mirror so the value on screen can be read back.
             if (reverse.reverse) {
-                visual.push({
+                const mirror = {
                     type: "tween",
                     target,
                     key,
@@ -226,7 +268,10 @@ function pushTweens(objects, keys, toValue, duration, easing, reverse, reverseEa
                     start: tween.tweenEnd + reverse.reverseDelay,
                     tweenEnd: tween.tweenEnd + reverse.reverseDelay + duration,
                     easing: reverseEasing
-                });
+                };
+
+                tween.mirror = mirror;
+                visual.push(mirror);
             }
         }
     }
@@ -260,11 +305,13 @@ function parseColor(color) {
 
 // Color the given color tween holds at time t, as an RGB array.
 function colorChainValue(tween, t) {
-    const span = tween.tweenEnd - tween.start;
-    const p = span <= 0 ? 1 : Math.min(Math.max((t - tween.start) / span, 0), 1);
-    const e = tween.easing(p);
-    const from = tween.color.from;
-    const to = tween.color.to;
+    const leg = ownedLeg(tween, t);
+    const span = leg.tweenEnd - leg.start;
+    const p = span <= 0 ? 1 : Math.min(Math.max((t - leg.start) / span, 0), 1);
+    const e = leg.easing(p);
+
+    const from = leg.color.from;
+    const to = leg.color.to;
 
     return [
         from[0] + (to[0] - from[0]) * e,
@@ -333,7 +380,7 @@ export function moveTo(id, targets, duration = 0, opts = {}) {
 
     for (const key of Object.keys(targets)) {
         if (key !== "posX" && key !== "posY" && !objects.some((target) => target[key] !== undefined))
-            throw new Error(`moveTo(): no visual events with id ${JSON.stringify(id)} define "${key}".`);
+            throw new Error(`moveTo(): no visual events with id ${showIds(ids)} define "${key}".${idHintSuffix(id)}`);
     }
 
     let center = null;
@@ -370,21 +417,24 @@ export function recolor(id, color, duration = 0, opts = {}) {
     const reverseEasing = reverse.reverse && reverse.reverseMirror ? resolveEasing(opts, true) : easing;
     const to = parseColor(color);
     const ids = toIdArray(id);
+    const targets = visual.filter((event) => matchesIds(event, ids));
+
+    if (targets.length === 0)
+        throw new Error(unknownIdMessage("recolor()", id));
 
     let matched = 0;
-    visual.forEach((event) => {
-        if (!matchesIds(event, ids)) return;
-
+    for (const event of targets) {
         const base = event.color ?? event.fontColor;
-        if (base === undefined) return;
+        if (base === undefined) continue;
 
         const prev = colorTweens.get(event);
-        if (prev) prev.end = getTime();
+        const from = prev ? colorChainValue(prev, getTime()) : parseColor(base);
+        if (prev) closeLeg(prev, getTime());
 
         const tween = {
             type: "tween",
             target: event,
-            color: {from: prev ? colorChainValue(prev, getTime()) : parseColor(base), to},
+            color: {from, to},
             start: getTime(),
             tweenEnd: getTime() + duration,
             easing
@@ -395,20 +445,23 @@ export function recolor(id, color, duration = 0, opts = {}) {
 
         // Mirror color back to its start value after a delay, into `visual` only.
         if (reverse.reverse) {
-            visual.push({
+            const mirror = {
                 type: "tween",
                 target: event,
                 color: {from: tween.color.to, to: tween.color.from},
                 start: tween.tweenEnd + reverse.reverseDelay,
                 tweenEnd: tween.tweenEnd + reverse.reverseDelay + duration,
                 easing: reverseEasing
-            });
+            };
+
+            tween.mirror = mirror;
+            visual.push(mirror);
         }
         matched++;
-    });
+    }
 
     if (matched === 0)
-        throw new Error(`recolor(): no visual events with id ${JSON.stringify(id)}.`);
+        throw new Error(`recolor(): no visual events with id ${showIds(ids)} have a color to recolor.${idHintSuffix(id)}`);
 }
 
 // Orbit tween: sweep every object sharing a queried id along a circular arc
@@ -461,14 +514,17 @@ export function rotateAround(id, center, angle, duration = 0, opts = {}) {
 
         // Mirror the orbit back to its start angle after a delay, into `visual` only.
         if (reverse.reverse) {
-            visual.push({
+            const mirror = {
                 type: "tween",
                 target,
                 orbit: {cx: pivot.x, cy: pivot.y, dx, dy, r0, fromAngle: orbit.orbit.toAngle, toAngle: orbit.orbit.fromAngle},
                 start: orbit.tweenEnd + reverse.reverseDelay,
                 tweenEnd: orbit.tweenEnd + reverse.reverseDelay + duration,
                 easing: reverseEasing
-            });
+            };
+
+            orbit.mirror = mirror;
+            visual.push(mirror);
         }
     }
 }

@@ -1,8 +1,8 @@
 "use strict";
 import {Param, effectiveParam, mergeParam} from "./param.js";
 import {getSegmentsWidth, wrapTextSegments} from "./textParser.js";
-import {getTime, advanceTime, nextAutoId, textProp, visual} from "./state.js";
-import {normalizeIds, requireType, resolveDuration, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
+import {getTime, advanceTime, takeAutoId, textProp, visual} from "./state.js";
+import {normalizeIds, requireType, resolveDuration, validateDuration, validateGlow, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
 
 // Distinct automatic ids collected for each part of the current newText() call.
 let currentPartId = null;
@@ -12,6 +12,9 @@ function pushTextSegment(prop, seg, posX, posY, end, ids) {
         type: "text",
         ids,
         text: seg.text,
+        // Whitespace-only chunks keep their slot in the layout but render()
+        // skips them: a fillText(" ") paints nothing.
+        blank: seg.text.trim().length === 0,
         posX,
         posY,
         anchorX: prop.posX,
@@ -24,6 +27,9 @@ function pushTextSegment(prop, seg, posX, posY, end, ids) {
         italic: seg.italic ?? prop.italic,
         flashDuration: prop.flashDuration,
         flashColor: prop.flashColor,
+        glowRange: prop.glowRange,
+        glowIntensity: prop.glowIntensity,
+        glowColor: prop.glowColor,
         fadeIn: prop.fadeIn,
         fadeOut: prop.fadeOut,
         opacity: prop.opacity,
@@ -52,7 +58,7 @@ function pushTextLine(prop, segments, linePosY, end, multiSegment, partIds) {
 
         if (typeof seg === "object") {
             if (multiSegment && currentPartId === null) {
-                currentPartId = nextAutoId();
+                currentPartId = takeAutoId();
                 partIds.push(currentPartId);
             }
             const segWidth = segWidths[i];
@@ -77,6 +83,7 @@ export function newText(newProp) {
     validateOpacity(prop.opacity);
     validateRotation(prop.rotation);
     validateLayoutOrder(prop.layoutOrder);
+    validateGlow(prop.glowRange, prop.glowIntensity, prop.glowColor);
 
     if (typeof prop.text !== "string")
         throw new Error(`Text must be a string, got ${typeof prop.text}.`);
@@ -84,7 +91,7 @@ export function newText(newProp) {
     if (typeof prop.italic !== "boolean")
         throw new Error(`italic must be a boolean, got ${JSON.stringify(prop.italic)}.`);
 
-    prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
+    prop.id = normalizeIds(prop.id) ?? [takeAutoId()];
     const end = resolveDuration(prop.duration);
 
     // Wrap while preserving style state across line breaks.
@@ -143,25 +150,28 @@ export function newText(newProp) {
 }
 
 // Batch-create multiple text events from an array of config objects.
-// Each config is passed to newText() with automatic vertical spacing:
-// if a config omits posY, it is placed `lineGap` below the previous text.
-// Returns an array of ids, one per created text.
-export function newTexts(texts, configs) {
+// `configs` is shared by every entry and accepts `posY` (where the stack
+// starts) plus `textGap` (extra space between stacked texts); an entry
+// without its own posY is placed below the previous one.
+// Returns one id (or {id, seg} object) per created text.
+export function newTexts(texts, configs = {}) {
     if (!Array.isArray(texts))
         throw new Error(`newTexts() expects an array of text configs, got ${JSON.stringify(texts)}.`);
 
-    const {textGap, posY} = configs;
-    delete configs.textGap;
-    delete configs.posY;
+    if (configs === null || typeof configs !== "object" || Array.isArray(configs))
+        throw new Error(`newTexts() expects an options object as its second argument, got ${JSON.stringify(configs)}.`);
+
+    // Copied, never mutated: the caller's options object stays reusable.
+    const {textGap = 0, posY, ...shared} = configs;
 
     const ids = [];
-    let cursorY = posY;
+    let cursorY = posY ?? 0;
 
     for (const text of texts) {
         if (typeof text !== "object" || text === null || Array.isArray(text))
             throw new Error(`newTexts() each config must be an object, got ${JSON.stringify(text)}.`);
 
-        const merged = {...text, ...configs};
+        const merged = {...text, ...shared};
 
         // Auto-space: if posY is not set, place below previous text.
         if (merged.posY === undefined) {
@@ -175,7 +185,7 @@ export function newTexts(texts, configs) {
         // Use the merged config's fontSize (defaults resolve inside newText).
         const fontSize = merged.fontSize ?? Param.text.fontSize;
         const lineGap = merged.lineGap ?? Param.text.lineGap;
-        const lineCount = wrapTextSegments(mergeParam("text", merged, "newTexts()")).length
+        const lineCount = wrapTextSegments(mergeParam("text", merged, "newTexts()")).length;
         const textHeight = fontSize * lineCount + lineGap * (lineCount - 1);
         cursorY += (textHeight + fontSize) / 2 + textGap;
     }

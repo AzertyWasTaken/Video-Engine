@@ -31,4 +31,16 @@ let autoId = -1;
 
 export function nextAutoId() {return autoId--;}
 
+// Auto id that no existing event uses yet: an id handed out by getAutoId() and
+// then passed to a creator explicitly keeps its meaning, instead of colliding
+// with the next auto-assigned id.
+export function takeAutoId() {
+    let id = nextAutoId();
+    while (visual.some((event) => event.ids !== undefined && event.ids.includes(id)))
+        id = nextAutoId();
+    return id;
+}
+
+// Reset the auto-id counter (used by reset()).
+export function resetAutoId() {autoId = -1;}
 export function currentAutoId() {return autoId;}

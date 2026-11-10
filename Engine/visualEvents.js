@@ -1,9 +1,9 @@
 "use strict";
 import {mergeParam} from "./param.js";
 import {measureTextWidth} from "./textParser.js";
-import {getTime, advanceTime, nextAutoId, visual} from "./state.js";
+import {getTime, advanceTime, takeAutoId, visual} from "./state.js";
 import {
-    matchesIds, normalizeIds, normalizePositions,
+    hasEnded, matchesIds, normalizeIds, normalizePositions,
     requireType, resolveDuration,
     validateArc, validateDuration, validateLayoutOrder, validateOpacity, validateRotation, validateScales
 } from "./validate.js";
@@ -95,7 +95,9 @@ function getItemBox(item) {
 }
 
 // Bounding box of grouped `id` items in canvas space (unrotated, the same
-// box alignment baking and centerText() use). Empty group: every edge 0.
+// box alignment baking and centerText() use). Events that already ended are
+// skipped, so a reused id is measured from what is still on screen.
+// Empty group: every edge 0.
 export function getGroupBounds(ids) {
     const updMin = (a, b) => a > b || a === null ? b : a;
     const updMax = (a, b) => a < b || a === null ? b : a;
@@ -104,7 +106,7 @@ export function getGroupBounds(ids) {
     const maxPos = {x: null, y: null};
 
     visual.forEach((value) => {
-        if (matchesIds(value, ids)) {
+        if (!hasEnded(value) && matchesIds(value, ids)) {
             const box = getItemBox(value);
 
             minPos.x = updMin(minPos.x, value.posX + box.minX);
@@ -138,7 +140,7 @@ export function pushVisual(type, newProp, source = "pushVisual()") {
     validateOpacity(prop.opacity);
     validateRotation(prop.rotation);
     validateLayoutOrder(prop.layoutOrder);
-    prop.id = normalizeIds(prop.id) ?? [nextAutoId()];
+    prop.id = normalizeIds(prop.id) ?? [takeAutoId()];
 
     if (type === "circle") {
         validateArc(prop.arc);

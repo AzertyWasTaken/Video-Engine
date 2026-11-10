@@ -1,36 +1,30 @@
 "use strict";
-import {Param, effectiveParam, assertKnownKeys, suggestSimilar} from "./param.js";
-import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId, currentAutoId} from "./state.js";
-import {matchesIds, resolveDuration, resolvePropEntries, requireType, toIdArray, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
+import {Param, effectiveParam, assertKnownKeys} from "./param.js";
+import {advanceTime, audio, chapters, getTime, setTime, textProp, visual, nextAutoId, currentAutoId, resetAutoId, assetMap} from "./state.js";
+import {hasEnded, knownIds, matchesIds, resolveDuration, resolvePropEntries, requireType, showIds, toIdArray, unknownIdMessage, validateDuration, validateLayoutOrder, validateOpacity, validateRotation} from "./validate.js";
 import {setAssets as setAssetMap, getAssets as getAssetMap} from "./assets.js";
 import {getGroupCenter, getGroupSize, pushVisual as pushVisualEvent} from "./visualEvents.js";
 import {addChapter as pushChapter, runScene as runSceneEvent, chapterTimestamps} from "./chapters.js";
 import {animate as applyAnimate, moveTo as applyMoveTo, recolor as applyRecolor, rotateAround as applyRotateAround, getPropertyOffset} from "./tweens.js";
 import {newText as createText, newTexts as createTexts} from "./textEvents.js";
+import {resetRenderCache} from "./render.js";
 
-// Per-type checkpoint stacks for saveParam() / undoParam().
-const propCheckpoints = new Map();
+// Snapshot of pristine Param defaults, used by reset().
+const initialParam = structuredClone(Param);
 
-// Warn (never throw) when an id matches no events yet - usually a typo.
-// Events are never removed, so legitimate clears keep matching.
-function describeUnknownId(action, ids) {
-    const known = [];
-    for (const event of visual) {
-        for (const key of event.ids ?? []) {
-            if (!known.includes(key)) known.push(key);
+// Warn (never throw) when an id query matched nothing or only already-ended
+// events. Returns true when the caller should bail out - nothing usable to act on.
+function warnIfUnmatched(action, ids) {
+    if (visual.some((value) => matchesIds(value, ids))) {
+        if (!visual.some((value) => matchesIds(value, ids) && !hasEnded(value))) {
+            console.warn(`${action}: all visual events with id ${showIds(ids)} have already ended.`);
+            return true;
         }
-        if (known.length >= 20) break;
+        return false;
     }
 
-    const hints = ids
-        .map((id) => suggestSimilar(id, known))
-        .filter((hint, index, list) => hint !== null && list.indexOf(hint) === index);
-
-    return `${action}: no visual events with id ${JSON.stringify(ids.length === 1 ? ids[0] : ids)} - nothing changed.` +
-        (hints.length > 0 ? ` Did you mean ${hints.map((hint) => JSON.stringify(hint)).join(" or ")}?` : "") +
-        (known.length > 0
-            ? ` Known ids: ${known.slice(0, 8).map((key) => JSON.stringify(key)).join(", ")}.`
-            : " No visual events exist yet.");
+    console.warn(unknownIdMessage(action, ids));
+    return true;
 }
 
 // Public API facade. Timeline and event logic lives in the dedicated modules;
@@ -38,9 +32,10 @@ function describeUnknownId(action, ids) {
 export const Engine = {
     // ---- Time cursor ----
 
-    wait(sec) {
+    // Advance the cursor by `sec` seconds (0 when omitted).
+    wait(sec = 0) {
         if (typeof sec !== "number" || !Number.isFinite(sec))
-            throw new Error(`wait() expects a finite number of seconds, got ${sec}.`);
+            throw new Error(`wait() expects a finite number of seconds, got ${JSON.stringify(sec)}.`);
 
         advanceTime(sec);
     },
@@ -71,31 +66,20 @@ export const Engine = {
 
     // ---- Param defaults ----
 
-    saveParam(type = "global") {
-        requireType(type);
-
-        const stack = propCheckpoints.get(type) ?? [];
-        stack.push({...Param[type]});
-        propCheckpoints.set(type, stack);
-    },
-
-    undoParam(type = "global") {
-        requireType(type);
-
-        const stack = propCheckpoints.get(type);
-        if (!stack || stack.length === 0)
-            throw new Error(`No saved checkpoint for type "${type}" - call saveParam("${type}") first.`);
-
-        Param[type] = stack.pop();
-    },
-
     // Scoped defaults: apply newProp, run fn(), then restore (even on throw).
-    // Multi-type form: withProp({text: {...}, circle: {...}}, fn).
-    withProp(newProp, fn) {
-        if (typeof fn !== "function")
-            throw new Error("withProp() expects a callback function.");
+    // Forms: withProp(props, fn), withProp(props, type, fn),
+    // withProp({text: {...}, circle: {...}}, fn).
+    withProp(newProp, typeOrFn, maybeFn) {
+        const fn = typeof typeOrFn === "function" ? typeOrFn : maybeFn;
+        const type = typeof typeOrFn === "string" ? typeOrFn : undefined;
 
-        const entries = resolvePropEntries(newProp);
+        if (typeof fn !== "function")
+            throw new Error(
+                "withProp() expects a callback: withProp(props, fn), withProp(props, type, fn), " +
+                "or withProp({text: {...}}, fn)."
+            );
+
+        const entries = resolvePropEntries(newProp, type);
 
         // Validate every type before mutating any of them.
         for (const [entryType] of entries)
@@ -150,8 +134,12 @@ export const Engine = {
             const keyA = effectiveParam(type, key);
             const keyB = newProp[key];
 
-            if (!isFinite(keyA) || !isFinite(keyB))
-                throw new Error(`Nonnumber values are not accepted: ${keyA}, ${keyB}`);
+            if (typeof keyA !== "number" || !Number.isFinite(keyA)
+                || typeof keyB !== "number" || !Number.isFinite(keyB))
+                throw new Error(
+                    `changeProp(): ${JSON.stringify(key)} must combine finite numbers, ` +
+                    `got ${JSON.stringify(keyA)} + ${JSON.stringify(keyB)}. Use setProp() for non-numeric properties.`
+                );
 
             const value = keyA + keyB;
             if (key === "opacity") validateOpacity(value);
@@ -165,16 +153,20 @@ export const Engine = {
     // Sound and image paths are stored as written: a registered shorthand, an
     // absolute path, or a path relative to the calling script. record() and
     // addSounds() resolve them once, after the timeline is built.
-    playSound(filePath, volume) {
+    // Second argument: a volume number, or an options object {volume}.
+    playSound(filePath, volume = 1) {
         if (typeof filePath !== "string" || filePath.length === 0)
             throw new Error(`playSound() expects a non-empty file path string, got ${JSON.stringify(filePath)}.`);
+
+        if (volume !== null && typeof volume === "object")
+            volume = volume.volume ?? 1;
 
         if (
             volume !== undefined
             && volume !== null
             && (typeof volume !== "number" || !Number.isFinite(volume) || volume < 0)
         )
-        throw new Error(`playSound() expects a non-negative finite volume, got ${volume}.`);
+        throw new Error(`playSound() expects a non-negative finite volume, got ${JSON.stringify(volume)}.`);
 
         audio.push({
             sound: filePath,
@@ -217,7 +209,7 @@ export const Engine = {
     newText(newProp) {return createText(newProp);},
 
     // Batch-create multiple text events with automatic vertical spacing.
-    newTexts(texts, configs) {return createTexts(texts, configs);},
+    newTexts(texts, configs = {}) {return createTexts(texts, configs);},
 
     newLine(newProp) {return pushVisualEvent("line", newProp, "newLine()");},
 
@@ -235,7 +227,7 @@ export const Engine = {
 
     scene(name, fn, opts) {
         const chapter = runSceneEvent(name, fn, opts);
-        this.waitUntilIdle();
+        Engine.waitUntilIdle();
         return chapter;
     },
 
@@ -262,7 +254,7 @@ export const Engine = {
         const ids = toIdArray(id);
         const stored = ids.map((idKey) => textProp[idKey]).find((entry) => entry !== undefined);
         if (!stored)
-            throw new Error(`No text found with id ${JSON.stringify(id)} - call newText() with this id before setText().`);
+            throw new Error(unknownIdMessage("setText()", id, "- call newText() with this id before setText()."));
 
         if (typeof opts !== "object" || opts === null)
             throw new Error(`setText() expects an options object, got ${typeof opts}.`);
@@ -278,8 +270,11 @@ export const Engine = {
 
         // Tween events target the old segment events, so bake their current
         // offsets into the replacement props - otherwise the new text snaps
-        // back to its pre-tween position.
-        const source = visual.find((value) => value.type === "text" && matchesIds(value, ids));
+        // back to its pre-tween position. The source is the text on screen:
+        // the last one created for these ids. An older text was already
+        // replaced by a previous setText(), and its offsets are baked into the
+        // stored config, so reading them again would compound the values.
+        const source = visual.findLast((value) => value.type === "text" && matchesIds(value, ids));
         const baked = {};
         if (source) {
             for (const key of ["posX", "posY", "rotation", "fontSize", "opacity"]) {
@@ -294,6 +289,7 @@ export const Engine = {
 
         // Explicit fontSize option overrides the baked (tweened) value.
         if (fontSize !== undefined) baked.fontSize = fontSize;
+        const now = getTime();
 
         advanceTime(fade * align);
         Engine.clear(id, fade);
@@ -309,21 +305,18 @@ export const Engine = {
             fadeIn: fade,
             hold
         });
-        advanceTime(fade);
+        setTime(now);
     },
 
     centerText(id, posX = null, posY = null) {
         const ids = toIdArray(id);
 
-        if (!visual.some((value) => matchesIds(value, ids))) {
-            console.warn(describeUnknownId("centerText()", ids));
-            return;
-        }
+        if (warnIfUnmatched("centerText()", ids)) return;
 
         const center = getGroupCenter(ids);
 
         visual.forEach((value) => {
-            if (matchesIds(value, ids)) {
+            if (matchesIds(value, ids) && !hasEnded(value)) {
                 if (posX !== null) {
                     const deltaX = posX - center.x;
                     value.posX += deltaX;
@@ -341,35 +334,104 @@ export const Engine = {
         });
     },
 
-    clear(id, fading) {
+    clear(id, fadeOut) {
         const ids = toIdArray(id);
         const now = getTime();
 
         if (!visual.some((value) => matchesIds(value, ids)))
-            console.warn(describeUnknownId("clear()", ids));
+            console.warn(unknownIdMessage("clear()", id));
 
         visual.forEach((value) => {
             if (matchesIds(value, ids)) {
                 if (value.end === undefined || value.end > now) {
                     value.end = now;
-                    if (typeof fading === "number") value.fadeOut = fading;
+                    if (typeof fadeOut === "number") value.fadeOut = fadeOut;
                 }
             }
         });
     },
 
-    clearAll(ignoreId, fading) {
-        const ids = toIdArray(ignoreId);
+    clearAll(keepId, fadeOut) {
+        const ids = toIdArray(keepId);
         const now = getTime();
+
+        // A keep filter that matches nothing is usually a typo: everything would go.
+        if (keepId !== undefined && keepId !== null && !visual.some((value) => matchesIds(value, ids)))
+            console.warn(unknownIdMessage("clearAll()", keepId, "- nothing was kept."));
 
         visual.forEach((value) => {
             if (!matchesIds(value, ids)) {
                 if (value.end === undefined || value.end > now) {
                     value.end = now;
-                    if (typeof fading === "number") value.fadeOut = fading;
+                    if (typeof fadeOut === "number") value.fadeOut = fadeOut;
                 }
             }
         });
+    },
+
+    // ---- Reset (tests / single-process iteration) ----
+
+    reset() {
+        visual.length = 0;
+        audio.length = 0;
+        chapters.length = 0;
+        setTime(0);
+        resetAutoId();
+
+        for (const key of Object.keys(textProp)) delete textProp[key];
+        assetMap.clear();
+
+        for (const type of Object.keys(initialParam)) {
+            Param[type] = structuredClone(initialParam[type]);
+        }
+        resetRenderCache();
+    },
+
+    // ---- Timeline summary / validation ----
+
+    getTimelineSummary(opts = {}) {
+        const maxEvents = Number.isFinite(opts?.maxEvents) && opts.maxEvents > 0 ? opts.maxEvents : 50;
+        const events = visual.slice(0, maxEvents).map((event) => ({
+            type: event.type,
+            ids: event.ids,
+            start: event.start ?? 0,
+            end: event.end ?? event.tweenEnd ?? null,
+        }));
+
+        const byType = {};
+        for (const event of visual) byType[event.type] = (byType[event.type] ?? 0) + 1;
+
+        return {
+            duration: getTime(),
+            visualEvents: visual.length,
+            audioEvents: audio.length,
+            byType,
+            chapters: chapters.map((chapter) => ({name: chapter.name, start: chapter.start, end: chapter.end})),
+            events,
+            truncated: visual.length > maxEvents ? visual.length - maxEvents : 0,
+        };
+    },
+
+    validateTimeline() {
+        const duration = getTime();
+        const epsilon = 1e-6;
+        const warnings = [];
+
+        if (!(duration > 0)) {
+            warnings.push("Cannot record: the timeline is 0 seconds long.");
+            return {ok: false, warnings};
+        }
+
+        for (const event of visual) {
+            const eventEnd = event.end ?? event.tweenEnd ?? null;
+            if (event.start >= duration - epsilon && (eventEnd === null || eventEnd > event.start + epsilon)) {
+                warnings.push(`never visible: ${event.type}${event.ids ? ` id ${JSON.stringify(event.ids)}` : ""} (start ${event.start ?? 0}s)`);
+            } else if (eventEnd !== null && eventEnd > duration + epsilon) {
+                warnings.push(`cut off: ${event.type}${event.ids ? ` id ${JSON.stringify(event.ids)}` : ""} (end ${eventEnd}s > ${duration}s)`);
+            }
+        }
+
+        return {ok: warnings.length === 0, warnings};
     },
 
     // ---- Queries ----
@@ -381,13 +443,19 @@ export const Engine = {
 
     getSize(id) {
         const ids = toIdArray(id);
+        warnIfUnmatched("getSize()", ids);
         return getGroupSize(ids);
     },
 
     getCenter(id) {
         const ids = toIdArray(id);
+        warnIfUnmatched("getCenter()", ids);
         return getGroupCenter(ids);
     },
+
+    // Every id currently carried by a visual event (deduped) - debugging aid
+    // for the "did you mean" hints on unknown-id errors.
+    getIds() {return knownIds();},
 
     getVisualTimeline() {return visual;},
 
@@ -395,33 +463,39 @@ export const Engine = {
 
     getDuration() {return getTime();},
 
-    // Repeat fn() for `seconds`, advancing the time cursor accordingly.
-    // Each iteration starts at the current cursor time. Useful for looping
-    // animations without manual wait()/newText() cycles.
+    // Call fn(i) `count` times. Iteration only: the cursor moves only through
+    // the wait() calls inside fn, so this loops animations without repeating
+    // the body by hand.
     repeat(count, fn) {
         if (typeof count !== "number" || !Number.isFinite(count) || count < 0)
-            throw new Error(`repeat() expects a non-negative finite number of seconds, got ${count}.`);
+            throw new Error(`repeat() expects a non-negative integer count, got ${JSON.stringify(count)}.`);
         if (typeof fn !== "function")
             throw new Error("repeat() expects a callback function.");
 
-        for (let i = 0; i < count; i++) fn(i);
+        const times = Math.floor(count);
+        for (let i = 0; i < times; i++) fn(i);
     },
 
+    // Nested loop over a rows x columns grid, calling fn(row, column).
     repeatGrid(rows, columns, fn) {
-        if (typeof rows !== "number" || !Number.isFinite(rows) || rows < 0)
-            throw new Error(`repeat() expects a non-negative finite number of seconds, got ${rows}.`);
-        if (typeof columns !== "number" || !Number.isFinite(columns) || columns < 0)
-            throw new Error(`repeat() expects a non-negative finite number of seconds, got ${columns}.`);
+        for (const [name, value] of [["rows", rows], ["columns", columns]]) {
+            if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+                throw new Error(`repeatGrid() expects a non-negative integer ${name}, got ${JSON.stringify(value)}.`);
+        }
         if (typeof fn !== "function")
-            throw new Error("repeat() expects a callback function.");
+            throw new Error("repeatGrid() expects a callback function.");
 
-        for (let x = 0; x < rows; x++)
-            for (let y = 0; y < columns; y++) fn(x, y);
+        const rowCount = Math.floor(rows);
+        const columnCount = Math.floor(columns);
+        for (let x = 0; x < rowCount; x++)
+            for (let y = 0; y < columnCount; y++) fn(x, y);
     },
 
-    // Return the next auto-assigned id (negative integer). Useful when you
-    // want to pre-assign an id before creating an event.
-    getNextId() {return nextAutoId();},
+    // Next auto-assigned id (negative integer) without consuming it, so it is
+    // the id the next creator would receive.
+    getAutoId() {return currentAutoId();},
 
-    getCurrentId() {return currentAutoId();}
+    // Same value as getAutoId(), but consuming it: the next auto-assigned
+    // creator skips this id.
+    getNextId() {return nextAutoId();}
 };

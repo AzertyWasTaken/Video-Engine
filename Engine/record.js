@@ -1,16 +1,32 @@
 "use strict";
 import path from "path";
+import os from "os";
 import {spawn} from "child_process";
 import fs from "fs";
 import {execFileSync} from "child_process";
-import {render, setCanvas, getPixelSize, loadImageAsset} from "./render.js";
+import {renderRawFrame, setCanvas, getPixelSize, loadImageAsset} from "./render.js";
 import {ffmpegPath, resolveCallerPath, assertFFmpegExists} from "./utils.js";
 import {resolveAsset} from "./assets.js";
 import {findChapter, chapterFileName} from "./chapters.js";
 
+// Parallel rendering splits the timeline across child processes of the same
+// script. Below these limits a single process is faster than the startup cost.
+const MIN_WORKER_WINDOW = 6;   // seconds of video
+const MIN_FRAMES_PER_WORKER = 120;
+const MAX_AUTO_WORKERS = 4;
+// Set on a worker child to pick its slice: "index/count".
+const SEGMENT_ENV = "ANIM_SEGMENT";
+
 // `pixelWIDTH`/`pixelHEIGHT` are the encoded resolution: FFmpeg's -video_size
 // and the frame readback both work in device pixels, not the logical design space.
+// `CONFIG.PRESET` / `CONFIG.CRF` are optional; encoding is not the bottleneck,
+// they exist for quality control.
 function getFFMPEG(CONFIG, pixelWIDTH, pixelHEIGHT, outputFile) {
+    const encode = ["-c:v", "libx264", "-preset", CONFIG.PRESET ?? "ultrafast"];
+
+    if (CONFIG.CRF !== undefined) encode.push("-crf", String(CONFIG.CRF));
+    encode.push("-pix_fmt", "yuv420p", "-threads", "0");
+
     return spawn(ffmpegPath, [
         "-y",
         "-f", "rawvideo",
@@ -18,12 +34,214 @@ function getFFMPEG(CONFIG, pixelWIDTH, pixelHEIGHT, outputFile) {
         "-video_size", `${pixelWIDTH}x${pixelHEIGHT}`,
         "-r", String(CONFIG.FPS),
         "-i", "-",
-        "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-pix_fmt", "yuv420p",
-        "-threads", "0",
+        ...encode,
         outputFile
     ]);
+}
+
+// Split a frame count into `count` contiguous chunks (the first `extra` chunks
+// are one frame longer). Frame counts, not time windows: the parts must add up
+// to exactly the frames a single-process render would produce.
+export function splitFrames(totalFrames, count) {
+    const base = Math.floor(totalFrames / count);
+    const extra = totalFrames - base * count;
+    return Array.from({length: count}, (_, index) => base + (index < extra ? 1 : 0));
+}
+
+// Parse the worker slice env var ("index/count"); null when not a worker.
+export function parseSegmentEnv(value) {
+    if (typeof value !== "string") return null;
+
+    const match = /^(\d+)\/(\d+)$/.exec(value.trim());
+    if (match === null) return null;
+
+    const index = Number(match[1]);
+    const count = Number(match[2]);
+    if (count < 2 || index >= count) return null;
+
+    return {index, count};
+}
+
+// The concat demuxer list for the rendered parts. Single quotes are escaped and
+// paths use forward slashes so Windows paths parse the same way.
+export function buildConcatList(files) {
+    const lines = files.map((file) => `file '${file.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`);
+    return lines.join("\n") + "\n";
+}
+
+function partFileName(index, count) {
+    return `visual_part${index + 1}of${count}.mp4`;
+}
+
+function availableCores() {
+    return os.availableParallelism?.() ?? os.cpus().length;
+}
+
+// How many processes should render this window. `requested` is CONFIG.WORKERS /
+// opts.workers ("auto" or undefined = pick from the core count); `disabled` is
+// set for chapter/edit renders, where a single process keeps the splice simple.
+export function resolveWorkers(requested, totalFrames, windowSeconds, disabled = false) {
+    if (disabled) return 1;
+
+    let count;
+    if (requested === undefined || requested === null || requested === "auto") {
+        count = Math.min(MAX_AUTO_WORKERS, Math.max(1, Math.floor(availableCores() / 4)));
+    } else {
+        if (!Number.isInteger(requested) || requested < 1)
+            throw new Error(`Cannot record: workers must be a positive integer or "auto", got ${JSON.stringify(requested)}.`);
+        count = Math.min(requested, Math.max(1, availableCores()));
+    }
+
+    if (windowSeconds < MIN_WORKER_WINDOW || totalFrames < MIN_FRAMES_PER_WORKER) return 1;
+
+    return Math.max(1, Math.min(count, Math.floor(totalFrames / MIN_FRAMES_PER_WORKER)));
+}
+
+// ~1 line per encoded second: enough to watch a long render without flooding.
+function createProgress(label, totalFrames, fps) {
+    const step = Math.max(1, Math.round(fps));
+    const startedAt = Date.now();
+
+    return (done) => {
+        if (done % step !== 0 && done !== totalFrames) return;
+
+        const elapsed = (Date.now() - startedAt) / 1000;
+        const rate = elapsed > 0 ? done / elapsed : 0;
+        const percent = totalFrames > 0 ? (done / totalFrames) * 100 : 100;
+        console.log(`${label}frame ${done}/${totalFrames} (${percent.toFixed(0)}%) - ${rate.toFixed(1)} fps`);
+    };
+}
+
+// Stream `frames` consecutive frames from `start` into one FFmpeg process.
+async function renderFrames(CONFIG, visual, start, frames, outputFile, label = "") {
+    const {FPS} = CONFIG;
+    const pixel = getPixelSize();
+    const ffmpeg = getFFMPEG(CONFIG, pixel.WIDTH, pixel.HEIGHT, outputFile);
+    const progress = createProgress(label, frames, FPS);
+
+    // Subscribed before the loop: a write failure must not leave the await hanging.
+    const closed = new Promise((resolve, reject) => {
+        ffmpeg.on("close", (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`ffmpeg exited with code ${code}`));
+        });
+        ffmpeg.on("error", reject);
+    });
+    ffmpeg.stdin.on("error", () => {});
+
+    try {
+        for (let f = 0; f < frames; f++) {
+            const buffer = renderRawFrame(visual, start + f / FPS);
+
+            if (!ffmpeg.stdin.write(buffer)) {
+                await new Promise((resolve) => ffmpeg.stdin.once("drain", resolve));
+            }
+
+            progress(f + 1);
+        }
+
+        ffmpeg.stdin.end();
+    } catch (error) {
+        ffmpeg.kill();
+        throw error;
+    }
+
+    await closed;
+}
+
+// A worker child re-runs the calling script, so anything it prints while building
+// the timeline (its own logs, the caller's progress messages) would repeat once
+// per worker. Those channels are muted from module load - before the importing
+// script's body runs - and record() unmutes just before the slice starts
+// streaming, so the engine's own progress lines still reach the terminal.
+// console.error stays open: real failures must survive the mute.
+const MUTED_METHODS = ["log", "info", "debug", "trace", "warn", "dir", "table"];
+const mutedConsole = new Map();
+
+function muteScriptOutput() {
+    for (const method of MUTED_METHODS) {
+        const original = console[method];
+        if (typeof original !== "function" || mutedConsole.has(method)) continue;
+
+        mutedConsole.set(method, original);
+        console[method] = () => {};
+    }
+}
+
+function restoreScriptOutput() {
+    for (const [method, original] of mutedConsole) console[method] = original;
+    mutedConsole.clear();
+}
+
+// A worker child re-runs the calling script, so it must be a real path.
+function canSpawnWorkers() {
+    const scriptPath = process.argv[1];
+    return typeof scriptPath === "string" && scriptPath.length > 0 && fs.existsSync(scriptPath);
+}
+
+// Spawn a child that renders one slice of the same timeline. Preview and
+// dry-run switches are stripped so the child actually encodes.
+function spawnWorker(index, count) {
+    const env = {...process.env, [SEGMENT_ENV]: `${index}/${count}`};
+
+    for (const key of ["ANIM_DRY_RUN", "ANIM_INSPECT", "ANIM_PREVIEW", "ANIM_PREVIEW_FRAMES", "ANIM_PREVIEW_GRID", "ANIM_PREVIEW_OUT"])
+        delete env[key];
+
+    return spawn(process.execPath, [process.argv[1]], {stdio: "inherit", env});
+}
+
+function waitForWorker(child, index) {
+    return new Promise((resolve, reject) => {
+        child.on("close", (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`Render worker ${index} exited with code ${code}.`));
+        });
+        child.on("error", reject);
+    });
+}
+
+// Render `workers` frame slices concurrently (this process renders the first
+// one) and join them with a stream-copy concat: identical encoder settings make
+// the parts directly concatenable, so the join is a demux pass, not an encode.
+async function renderParallel(CONFIG, visual, start, totalFrames, outputFile, videoDir, workers) {
+    const parts = splitFrames(totalFrames, workers);
+    const partFiles = parts.map((_, index) => path.join(videoDir, partFileName(index, workers)));
+    const listFile = path.join(videoDir, "visual_parts.txt");
+    const tempFile = outputFile + ".tmp.mp4";
+    const children = [];
+
+    console.log(`Rendering with ${workers} workers...`);
+
+    try {
+        for (let index = 1; index < workers; index++) children.push(spawnWorker(index, workers));
+
+        // Each process preloads only the images its own slice shows.
+        await preloadImages(visual, start, start + parts[0] / CONFIG.FPS, videoDir);
+
+        await Promise.all([
+            renderFrames(CONFIG, visual, start, parts[0], partFiles[0], `[part 1/${workers}] `),
+            ...children.map((child, index) => waitForWorker(child, index + 1)),
+        ]);
+
+        fs.writeFileSync(listFile, buildConcatList(partFiles));
+        execFileSync(ffmpegPath, [
+            "-y",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", listFile,
+            "-c", "copy",
+            tempFile,
+        ], {stdio: "inherit"});
+
+        fs.renameSync(tempFile, outputFile);
+        console.log("Video complete");
+        return outputFile;
+    } catch (error) {
+        for (const child of children) child.kill();
+        throw error;
+    } finally {
+        for (const file of [...partFiles, listFile, tempFile]) fs.rmSync(file, {force: true});
+    }
 }
 
 // Resolve chapter name and edit flag from opts, accepting several spellings.
@@ -172,37 +390,38 @@ export async function record(CONFIG, visual, duration, callerPath, opts = {}) {
     // SCALE raises the encoded resolution only; the events keep their logical
     // WIDTH x HEIGHT coordinates, so the framing is identical.
     setCanvas(WIDTH, HEIGHT, SCALE);
-    const pixel = getPixelSize();
 
-    const ffmpeg = getFFMPEG(CONFIG, pixel.WIDTH, pixel.HEIGHT, outputFile);
+    // Worker child: render this slice, write the part file, and stop. Anything
+    // after the render call (addSounds, uploads) belongs to the parent process.
+    const segment = parseSegmentEnv(process.env[SEGMENT_ENV]);
+    if (segment !== null) {
+        const parts = splitFrames(totalFrames, segment.count);
+        const firstFrame = parts.slice(0, segment.index).reduce((sum, size) => sum + size, 0);
+        const partStart = start + firstFrame / FPS;
+        const partFile = path.join(videoDir, partFileName(segment.index, segment.count));
 
-    await preloadImages(visual, start, end, videoDir);
+        await preloadImages(visual, partStart, partStart + parts[segment.index] / FPS, videoDir);
 
-    for (let f = 0; f < totalFrames; f++) {
-        const t = start + f / FPS;
-
-        const canvas = render(visual, t);
-        const frame = canvas.getContext("2d").getImageData(0, 0, pixel.WIDTH, pixel.HEIGHT);
-        const buffer = Buffer.from(frame.data.buffer);
-
-        if (!ffmpeg.stdin.write(buffer)) {
-            await new Promise(resolve => ffmpeg.stdin.once("drain", resolve));
-        }
+        // Only this worker's progress lines belong in the log from here on.
+        restoreScriptOutput();
+        await renderFrames(CONFIG, visual, partStart, parts[segment.index], partFile,
+            `[part ${segment.index + 1}/${segment.count}] `);
+        process.exit(0);
     }
 
-    ffmpeg.stdin.end();
+    // Chapter and edit renders stay single-process: the splice already re-reads
+    // the full video, and short windows gain nothing from extra startup.
+    const workers = canSpawnWorkers()
+        ? resolveWorkers(opts.workers ?? CONFIG.WORKERS, totalFrames, end - start, chapterName !== undefined || edit)
+        : 1;
 
-    await new Promise((resolve, reject) => {
-        ffmpeg.on("close", (code) => {
-            if (code === 0) {
-                console.log("Video complete");
-                resolve();
-            } else {
-                reject(new Error(`ffmpeg exited with code ${code}`));
-            }
-        });
-        ffmpeg.on("error", reject);
-    });
+    if (workers > 1) {
+        await renderParallel(CONFIG, visual, start, totalFrames, outputFile, videoDir, workers);
+    } else {
+        await preloadImages(visual, start, end, videoDir);
+        await renderFrames(CONFIG, visual, start, totalFrames, outputFile);
+        console.log("Video complete");
+    }
 
     // Edit mode: splice the chapter clip back into the full video.
     if (edit && chapter !== null) {
@@ -285,3 +504,7 @@ export async function preloadImages(visual, start, end, videoDir) {
         }
     }
 }
+
+// Module-level: mute as early as possible, while the importing script is still
+// building its timeline. record() restores it in the worker branch above.
+if (parseSegmentEnv(process.env[SEGMENT_ENV]) !== null) muteScriptOutput();

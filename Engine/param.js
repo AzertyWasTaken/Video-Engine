@@ -40,6 +40,10 @@ export const Param = {
 
         flashDuration: 0, // Flash duration on newly spawned text (disabled if 0)
         flashColor: "#808080", // Flash color on newly spawned text
+
+        glowRange: 0, // Glow blur radius in pixels around the glyphs (disabled if 0)
+        glowIntensity: 1, // Glow opacity multiplier from 0 to 1
+        glowColor: "#FFFFFF", // Glow color (halo only, the glyphs keep fontColor)
     },
 
     line: {
@@ -154,9 +158,18 @@ export function assertKnownKeys(type, newProp, source) {
         if (allowed.includes(key)) continue;
 
         const suggestion = suggestSimilar(key, allowed);
+        // The prop helpers target the `global` section by default, so name the
+        // type that owns the key instead of only listing the global keys.
+        const owner = source === "setProp()" || source === "changeProp()"
+            ? Object.keys(Param).find((name) => name !== type && name !== "addon" && key in Param[name])
+            : undefined;
+
         throw new Error(
             `${source}: unknown property ${JSON.stringify(key)} for type "${type}"` +
             (suggestion === null ? "." : ` - did you mean ${JSON.stringify(String(suggestion))}?`) +
+            (owner === undefined
+                ? ""
+                : ` It is a "${owner}" property - pass the type explicitly: ${source.replace("()", "")}({...}, "${owner}").`) +
             ` Valid keys: ${allowed.join(", ")}.`
         );
     }

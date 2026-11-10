@@ -2,7 +2,7 @@
 import {Canvas, loadImage} from "skia-canvas";
 import {fontString} from "./textParser.js";
 
-let canvas, width, height, pixelWidth, pixelHeight;
+let canvas, ctx2d, width, height, pixelWidth, pixelHeight;
 const imageCache = new Map();
 
 // Cache for sorted events to avoid re-sorting every frame.
@@ -11,6 +11,11 @@ const imageCache = new Map();
 let cachedVisualRef = null;
 let cachedVisualLength = -1;
 let cachedSortedEvents = null;
+let cachedBackgrounds = null;
+
+// Reused active-object buffer: render() runs per frame, so a fresh array per
+// frame would only churn the GC. Single-threaded, non-reentrant use.
+const activeObjects = [];
 
 // Drop the cached sort. Events are only pushed during normal use, so the
 // length check below already catches new events; this is for the case where
@@ -19,6 +24,7 @@ export function resetRenderCache() {
     cachedVisualRef = null;
     cachedVisualLength = -1;
     cachedSortedEvents = null;
+    cachedBackgrounds = null;
     sortedHasLayoutOrder = false;
 }
 
@@ -51,7 +57,9 @@ export function setCanvas(WIDTH, HEIGHT, SCALE = 1) {
     // Derived from the rounded pixel size, not from SCALE, so a fractional
     // SCALE (1.5) still tiles the logical frame onto the buffer exactly.
     // The transform persists across frames, so it is set once here.
-    canvas.getContext("2d").setTransform(pixelWidth / WIDTH, 0, 0, pixelHeight / HEIGHT, 0, 0);
+    // The context is cached too: render() asks for it every frame.
+    ctx2d = canvas.getContext("2d");
+    ctx2d.setTransform(pixelWidth / WIDTH, 0, 0, pixelHeight / HEIGHT, 0, 0);
 }
 
 // Encoded resolution in pixels - what FFmpeg's -video_size and the frame
@@ -64,11 +72,42 @@ function getSortedEvents(visual) {
     if (cachedVisualRef !== visual || visual.length !== cachedVisualLength) {
         cachedSortedEvents = [...visual]
         .sort((a, b) =>(a.start ?? 0) - (b.start ?? 0));
+        cachedBackgrounds = visual.filter((event) => event.type === "background");
         cachedVisualRef = visual;
         cachedVisualLength = visual.length;
         sortedHasLayoutOrder = cachedSortedEvents.some((event) => (event.layoutOrder ?? 0) !== 0);
     }
     return cachedSortedEvents;
+}
+
+// Background events in creation order, refreshed by the same cache key as the
+// sorted list above. Keeps the per-frame background lookup off the full event
+// array, which matters for long timelines.
+function getBackgrounds(visual) {
+    getSortedEvents(visual);
+    return cachedBackgrounds;
+}
+
+// Active background plus the one drawn beneath a crossfade. Walks the background
+// list backwards: the newest event starting at/before `t` wins while it is still
+// active (t < end), and the previous candidate - active or not - is the underlay.
+export function pickBackground(backgrounds, t) {
+    let background = null;
+    let prevBackground = null;
+
+    for (let i = backgrounds.length - 1; i >= 0; i--) {
+        const obj = backgrounds[i];
+        if (t < (obj.start ?? 0)) continue;
+
+        if (background !== null) {
+            prevBackground = obj;
+            break;
+        }
+
+        if (t < (obj.end ?? Infinity)) background = obj;
+    }
+
+    return {background, prevBackground};
 }
 
 // Binary search for the first event with start > t.
@@ -172,8 +211,9 @@ export function render(visual, t) {
     if (!width || !height || !canvas)
         throw new Error("Missing canvas property");
 
-    const ctx = canvas.getContext("2d");
-    const objects = [];
+    const ctx = ctx2d;
+    const objects = activeObjects;
+    objects.length = 0;
     pushRelevantObjects(objects, t, visual);
 
     // Stack overlapping objects by layoutOrder (higher draws on top).
@@ -182,20 +222,8 @@ export function render(visual, t) {
     // the binary search regardless.
     if (sortedHasLayoutOrder) objects.sort(byLayoutOrder);
 
-    // Find the active background plus the previous one (crossfade underlay).
-    let background = null;
-    let prevBackground = null;
-    for (let i = visual.length - 1; i >= 0; i--) {
-        const obj = visual[i];
-        if (obj.type !== "background" || t < (obj.start ?? 0)) continue;
-
-        if (background !== null) {
-            prevBackground = obj;
-            break;
-        }
-
-        if (t < (obj.end ?? Infinity)) background = obj;
-    }
+    // Active background plus the previous one (crossfade underlay).
+    const {background, prevBackground} = pickBackground(getBackgrounds(visual), t);
 
     ctx.globalAlpha = 1;
     ctx.fillStyle = "#000000";
@@ -232,6 +260,10 @@ export function render(visual, t) {
 
     for (const obj of objects) {
         if (obj.type === "tween" || obj.type === "background") continue;
+
+        // Whitespace-only text events (word wrapping keeps the gaps) paint
+        // nothing, so they never reach the canvas.
+        if (obj.blank) continue;
 
         // Tween offsets apply per object (one entry per tweened property)
         const tw = tweenOffsets.get(obj);
@@ -282,7 +314,29 @@ export function render(visual, t) {
                 textY = height / 2 + obj.anchorY + (obj.posY - obj.anchorY) * scale + (tw?.posY ?? 0);
             }
 
-            ctx.font = fontString(obj.italic, obj.fontWeight, fontSize, obj.fontFamily);
+            // The font string is rebuilt only when a fontSize tween actually
+            // changes the size; steady text reuses the string cached on the event.
+            if (obj.cachedFontSize !== fontSize) {
+                obj.cachedFontSize = fontSize;
+                obj.cachedFont = fontString(obj.italic, obj.fontWeight, fontSize, obj.fontFamily);
+            }
+            ctx.font = obj.cachedFont;
+
+            // Glow pass: the same glyphs drawn once with a blurred shadow paint
+            // the halo, then the crisp pass below paints the glyphs on top.
+            // shadowBlur is in the context transform's units, so glowRange stays
+            // in design pixels at any SCALE. Skipped entirely when disabled.
+            if (obj.glowRange > 0 && obj.glowIntensity > 0) {
+                ctx.shadowColor = obj.glowColor;
+                ctx.shadowBlur = obj.glowRange;
+                ctx.globalAlpha = opacity * obj.glowIntensity;
+                ctx.fillText(obj.text, textX, textY);
+
+                ctx.shadowBlur = 0;
+                ctx.shadowColor = "transparent";
+                ctx.globalAlpha = opacity;
+            }
+
             ctx.fillText(obj.text, textX, textY);
         }
         else if (obj.type === "rect") {
@@ -386,6 +440,21 @@ export function render(visual, t) {
     }
 
     return canvas;
+}
+
+// One frame as raw RGBA bytes, ready for FFmpeg's rawvideo demuxer.
+// `toBufferSync("raw")` is the fast readback path on a GPU canvas;
+// getImageData() takes a slow synchronous GPU path (several times slower,
+// with spikes when `shadowBlur` glow is on screen). The size check keeps the
+// buffer and FFmpeg's -video_size from ever drifting apart.
+export function renderRawFrame(visual, t) {
+    const buffer = render(visual, t).toBufferSync("raw");
+    const expected = pixelWidth * pixelHeight * 4;
+
+    if (buffer.length !== expected)
+        throw new Error(`Frame readback mismatch: expected ${expected} bytes for ${pixelWidth}x${pixelHeight}, got ${buffer.length}.`);
+
+    return buffer;
 }
 
 // Preload an image so it's available during rendering.
