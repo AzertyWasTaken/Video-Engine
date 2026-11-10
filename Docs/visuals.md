@@ -10,7 +10,7 @@ Every object creator (`_.newText()`, `_.newLine()`, `_.newCircle()`, `_.newRect(
 
 | Property | Default | Description |
 | - | - | - |
-| `id` | auto | Id or array of ids (string or finite number); the object is affected by any id it carries. A unique negative id is auto-assigned when omitted |
+| `id` | auto | Id, array of ids, or another creator's return value (string or finite number; nested arrays and `{id, seg}` results flatten); the object is affected by any id it carries. A unique negative id is auto-assigned when omitted |
 | `duration` | `null` | Seconds until the event auto-ends; `null` keeps it visible until `_.clear()` |
 | `posX`, `posY` | `0` | Offset from canvas center |
 | `rotation` | `0` | Clockwise rotation in degrees, about the object's anchor (`posX`/`posY` for shapes, the text layout anchor for text); tweenable |
@@ -25,18 +25,18 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 
 | Property | Default | Description |
 | - | - | - |
-| `positions` | `[]` | Array of vertex objects, each relative to `posX`/`posY`; consecutive vertices form the polyline segments (fewer than 2 draws nothing). **Each axis is optional and defaults to `0`**, so `{x: 120}` and `{y: -60}` are valid vertices |
+| `positions` | `[{x: -0.5, y: -0.5}, {x: 0.5, y: 0.5}]` | Array of vertex objects, each relative to `posX`/`posY`; consecutive vertices form the polyline segments (fewer than 2 draws nothing). **Each axis is optional and defaults to `0`**, so `{x: 120}` and `{y: -60}` are valid vertices |
 | `scaleX` | `1` | Horizontal multiplier applied to every vertex offset (`lineWidth` is unaffected); tweenable |
 | `scaleY` | `1` | Vertical multiplier applied to every vertex offset; tweenable |
-| `lineWidth` | `16` | Stroke width in pixels |
+| `lineWidth` | `20` | Stroke width in pixels |
 | `color` | `"#FFFFFF"` | Line color (any CSS color string) |
 
 ## Rectangle properties (`type: "rect"`)
 
 | Property | Default | Description |
 | - | - | - |
-| `width` | `256` | Rectangle width in pixels |
-| `height` | `256` | Rectangle height in pixels |
+| `width` | `320` | Rectangle width in pixels |
+| `height` | `320` | Rectangle height in pixels |
 | `strokeColor` | `null` | Stroke color; `null` disables the stroke |
 | `strokeWidth` | `4` | Stroke width in pixels |
 | `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
@@ -45,13 +45,13 @@ The tables below list the type-specific properties. See [engine-api.md](./engine
 
 | Property | Default | Description |
 | - | - | - |
-| `diameter` | `40` | Circle size in pixels (see rendering note below) |
+| `diameter` | `80` | Circle size in pixels; the drawn radius is `diameter / 2` (see rendering note below) |
 | `arc` | `360` | Arc sweep in clockwise degrees from 12 o'clock; `360` is a full circle. A partial arc fills as a pie wedge; the stroke follows only the arc rim. Tweenable |
 | `strokeColor` | `null` | Stroke color; `null` disables the stroke |
 | `strokeWidth` | `4` | Stroke width in pixels |
 | `color` | `"#FFFFFF"` | Fill color (any CSS color string) |
 
-> **Rendering note:** `render.js` passes `diameter` directly as the canvas arc *radius*, so the drawn circle's radius equals the `diameter` value (visual size = 2 x `diameter`).
+> **Rendering note:** `diameter` is the full width of the circle - `render.js` uses `diameter / 2` as the arc radius, so the drawn radius is half the `diameter` value.
 
 ## Shape properties (`type: "shape"`)
 
@@ -71,8 +71,8 @@ A closed path through `(posX + x * scaleX, posY + y * scaleY)` for every vertex 
 | Property | Default | Description |
 | - | - | - |
 | `src` | `""` | Image source: a shorthand registered with `_.setAssets()`, an absolute path, or a path relative to the calling script's directory |
-| `width` | `256` | Rendered width in pixels |
-| `height` | `256` | Rendered height in pixels |
+| `width` | `320` | Rendered width in pixels |
+| `height` | `320` | Rendered height in pixels |
 
 Images are preloaded by `record()` before the first frame; each `src` is resolved through the shorthand map set by `_.setAssets()` (see [engine-api.md](./engine-api.md#sound--assets)), falling back to the calling script's directory for plain relative paths. Failed loads log a console warning and the image is skipped during rendering; an empty `src` is skipped with a warning.
 
@@ -83,7 +83,7 @@ All events pushed to the visual timeline share this structure (`start` is set to
 | `type` | Fields | Description |
 | - | - | - |
 | `"background"` | `color`, `start`, `fadeIn`, `fadeOut`, `end?` | Fills the canvas; the most recent background with `start <= t < end` wins (default `#000000`) |
-| `"text"` | `ids`, `text`, `posX`, `posY`, `rotation`, `anchorX`, `anchorY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `italic`, `flashDuration`, `flashColor`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Rendered text segment |
+| `"text"` | `ids`, `text`, `posX`, `posY`, `rotation`, `anchorX`, `anchorY`, `fontFamily`, `fontSize`, `fontColor`, `fontWeight`, `italic`, `flashDuration`, `flashColor`, `glowRange`, `glowIntensity`, `glowColor`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Rendered text segment |
 | `"circle"` | `ids`, `posX`, `posY`, `rotation`, `diameter`, `arc`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Filled circle (optional stroke), or a pie wedge when `arc` is below `360` |
 | `"rect"` | `ids`, `posX`, `posY`, `rotation`, `width`, `height`, `color`, `strokeColor`, `strokeWidth`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Filled rectangle (optional stroke) |
 | `"line"` | `ids`, `posX`, `posY`, `rotation`, `positions`, `scaleX`, `scaleY`, `lineWidth`, `color`, `fadeIn`, `fadeOut`, `opacity`, `layoutOrder`, `start`, `end?` | Stroked polyline |
@@ -104,7 +104,7 @@ All events pushed to the visual timeline share this structure (`start` is set to
 
 ## Grouping & centering
 
-`_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events sharing a queried id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id or an array of ids; each call affects every matching object exactly once. Works for text, rects, circles, shapes, lines, and images.
+`_.centerText(id, posX = null, posY = null)` computes the bounding box of all visual events sharing a queried id and shifts them so the group's center lands at `(posX, posY)`. Each axis moves only when its argument is not `null`. Accepts a single id, an array of ids, or a creator's return value; each call affects every matching object exactly once. Works for text, rects, circles, shapes, lines, and images. Events that have already ended are excluded from the box, so an id reused across scenes is measured from what is still on screen. `_.clearAll(keepId, fadeOut)` is the bulk version of `_.clear()`: it ends every active event except the ones sharing `keepId`, warning when the keep id matches nothing.
 
 ## Layout order
 

@@ -4,9 +4,9 @@
 
 Text is created with `_.newText(newProp)` and rendered by `Engine/render.js`. This page covers the text configuration, the symbol-based markup system, and the rendering pipeline.
 
-For default-property helpers (`setProp`, `changeProp`, checkpoints), see [engine-api.md](./engine-api.md).
+For default-property helpers (`setProp`, `changeProp`, `withProp`), see [engine-api.md](./engine-api.md).
 
-`_.newText()` returns the group's ids (array). When `segmentSymbol` splits text into two or more segments, it returns an object `{id, textId, parts, partIds, ids}` with distinct automatic ids per segment. Common properties shared by all creators (`id`, `duration`, `posX`/`posY`, `rotation`, `fadeIn`/`fadeOut`, `opacity`) are listed in [visuals.md](./visuals.md#common-properties-object-creators).
+`_.newText()` returns the group's ids (array). When `segmentSymbol` splits text into two or more segments, it returns an object `{id, seg}` with a distinct automatic id per segment (`seg` lists them in order). Both return shapes are accepted as-is by every id-taking function, so `_.clear(result)` clears the whole text without unpacking. Common properties shared by all creators (`id`, `duration`, `posX`/`posY`, `rotation`, `fadeIn`/`fadeOut`, `opacity`) are listed in [visuals.md](./visuals.md#common-properties-object-creators).
 
 ## Text configuration properties
 
@@ -24,14 +24,18 @@ Properties passed directly to `_.newText({...})` are merged on top of the persis
 | `alignY` | `0` | Vertical alignment: `-1` (top), `0` (center), `1` (bottom); the block shifts to that side of `posY` |
 | `lineGap` | `0` | Extra vertical space between lines in pixels (negative tightens) |
 | `maxWidth` | `Infinity` | Line-wrap threshold in pixels |
-| `balancedWidth` | `false` | Decrease the maximum width to make the last line longer. Requires `maxWidth` to be finite. |
+| `balancedWidth` | `false` | Decrease the maximum width to make the last line longer. Requires a finite `maxWidth` and a positive `widthStep`. |
+| `widthStep` | `1` | Smallest width decrement the `balancedWidth` halving loop may apply (pixels) |
 | `autoSize` | `false` | Fit text on one line within `maxWidth`; hard line breaks are ignored. Requires a finite positive `maxWidth`. |
 | `fontSizeStep` | `1` | Positive font-size rounding step used by `autoSize` (`20` means the fitted size is a multiple of `20`). |
 | `styleSymbol` | `[]` | Enable style markup with the selected opening and closing symbols |
 | `segmentSymbol` | `null` | Enable segment splitting with the selected symbol (e.g. `";"`) |
 | `escapeSymbol` | `null` | Enable escaping special characters with the selected symbol (e.g. `"\\"`) |
 | `flashDuration` | `0` | Flash duration on newly spawned text (disabled if 0) |
-| `flashColor` | `"#FFFF60"` | Flash color on newly spawned text |
+| `flashColor` | `"#808080"` | Flash color on newly spawned text |
+| `glowRange` | `0` | Glow blur radius in pixels around the glyphs; `0` disables the glow |
+| `glowIntensity` | `1` | Glow opacity multiplier from `0` to `1` |
+| `glowColor` | `"#FFFFFF"` | Glow color (any CSS color string); only the halo is tinted |
 | `autoSetPosX` | `false` | Auto-increment `posX` for chained `newText` calls |
 | `autoSetPosY` | `false` | Auto-increment `posY` for chained `newText` calls |
 
@@ -79,12 +83,14 @@ When two entries could match at the same position, the longest symbol wins (`**`
 
 ### Segment splitting (`segmentSymbol`)
 
-Each line is split by the symbol into timed chunks. When `segmentSymbol` produces two or more segments, each segment becomes a distinct part with its own automatic id. `newText()` returns an object `{id, textId, parts, partIds, ids}` so you can animate individual parts:
+Each line is split by the symbol into timed chunks. When `segmentSymbol` produces two or more segments, each segment becomes a distinct part with its own automatic id. `newText()` returns an object `{id, seg}` so you can animate individual parts (`seg` lists the part ids in order):
 
 ```js
-const result = _.newText({text: "Split; into; parts"});
-// result.partIds === [id1, id2, id3]
-_.moveTo(result.partIds[0], {posX: -100}, 0.5);
+const result = _.newText({text: "Split; into; parts", segmentSymbol: ";"});
+// result.seg === [id1, id2, id3]
+_.moveTo(result.seg[0], {posX: -100}, 0.5);
+_.recolor(result, "#FF4040");   // the whole {id, seg} result addresses every part
+_.clear(result);
 ```
 
 Segment ids appear *only* when the text splits into two or more parts; single-segment text returns the group ids unchanged.
@@ -98,6 +104,10 @@ Prefix a special character (style open or close, segment, or escape symbol itsel
 ```js
 _.newText({text: "Use \\\\ to *escape*; special characters (like \\* or \\;)."});
 ```
+
+- Escaping works with or without `segmentSymbol`, and the escape character never reaches the rendered text.
+- Escaped characters add no width, so wrapping and auto-sizing measure the visible text only.
+- A trailing escape character with nothing left to escape is dropped.
 
 ### Line breaks (`\n`)
 
@@ -142,17 +152,32 @@ Set a symbol to `null` in the `_.newText()` call to override a globally-enabled 
 _.newText({text: "This has a ; that should not split.", segmentSymbol: null});
 ```
 
+## Glow
+
+`glowRange` (blur radius in pixels), `glowIntensity` (`0`..`1` halo alpha), and `glowColor` add a blurred halo behind the glyphs. The glow is off while `glowRange` is `0` (the default), so existing text renders exactly as before:
+
+```js
+_.newText({text: "Glowing", glowRange: 24});                    // white halo
+_.newText({text: "Colored", glowRange: 32, glowIntensity: 0.8, glowColor: "#40C0FF", posY: 150});
+```
+
+- The halo is drawn behind the glyphs, so `fontColor` and any `recolor()` tween only change the glyphs - `glowColor` tints the halo alone.
+- The glow stays `glowColor` during a `flashDuration` flash.
+- `glowRange` is a radius in the design space, so raising `CONFIG.SCALE` sharpens the glow without changing how far it spreads.
+- Each text segment glows on its own, so the halos of adjacent segments overlap slightly.
+- Set the values per call, or as persistent defaults with `_.setProp({glowRange: 24}, "text")`.
+
 ## Rendering pipeline
 
 1. Input text string
 2. `tokenizeText()` (`textParser.js`) - parse style and escape markers into tokens `[{text, color, fontWeight, fontFamily, italic, fontSize, offsetY}, ...]` (`fontSize`/`offsetY` are styleSymbol multipliers relative to the base `fontSize`)
-3. `chunkTokens()` - split tokens into word/space chunks, emitting `{break: true}` markers at `\n` characters
+3. `chunkTokens()` - split tokens into word/space chunks, consuming escape characters (so measuring and drawing see the same text), and emitting `{break: true}` markers at `\n` characters
 4. Auto-sizing (when enabled) - remove hard-break markers, measure visible segments, and binary-search the largest positive `fontSizeStep` multiple that fits `maxWidth`
-5. `splitLines()` - measure widths and wrap at `maxWidth` (trailing spaces removed; break markers flush the current line; `balancedWidth` re-wraps with a reduced width)
-6. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, color, fontWeight, fontFamily, italic}, ...]`
+5. `splitLines()` - measure widths and wrap at `maxWidth` (the trailing space of every line is removed, the last line included; break markers flush the current line; `balancedWidth` re-wraps with a reduced width)
+6. `segTextLine()` - split chunks at `segmentSymbol` into `["wait", {text, color, fontWeight, fontFamily, italic}, ...]`; an escaped segment symbol stays literal text
 7. `pushTextLine()` (`textEvents.js`) - measure segments, compute x-positions (centered, then shifted by `alignX`), push visual events; each segment part receives a distinct automatic id
-8. `newText()` (`textEvents.js`) - allocates a distinct id per segment part; returns an object when there are 2+ parts, otherwise returns the group ids (unchanged)
-9. `render.js` - draws each text event at `(width / 2 + posX, height / 2 + posY)` with `textAlign: center`, `textBaseline: middle`; a tweened `fontSize` rescales those positions about the text's `posX`/`posY` anchor (`anchorX`/`anchorY`), so segments and line spacing resize together (see [Resizing](#resizing))
+8. `newText()` (`textEvents.js`) - allocates a distinct id per segment part; returns `{id, seg}` when there are 2+ parts, otherwise returns the group ids (unchanged)
+9. `render.js` - draws each text event at `(width / 2 + posX, height / 2 + posY)` with `textAlign: center`, `textBaseline: middle`; a tweened `fontSize` rescales those positions about the text's `posX`/`posY` anchor (`anchorX`/`anchorY`), so segments and line spacing resize together (see [Resizing](#resizing)); with `glowRange > 0` the glyphs are drawn twice - a blurred shadow pass for the halo, then the crisp pass (see [Glow](#glow))
 
 ## Size hierarchy
 

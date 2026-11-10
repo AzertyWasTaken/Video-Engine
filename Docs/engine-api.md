@@ -15,17 +15,20 @@ _.wait(sec)          // Advance the time cursor by `sec` seconds (0 if omitted)
 _.seek(t)            // Jump the time cursor to absolute time t (seconds)
 _.waitUntilIdle()    // Advance the cursor past the latest open event (no-op when none are open)
 _.getDuration()      // Total elapsed time (current time cursor value)
-_.repeat(count, fn)    // Repeat fn(i) count times
+_.repeat(count, fn)  // Call fn(i) `count` times (integer)
+_.repeatGrid(rows, columns, fn)  // Call fn(row, column) once per grid cell
 ```
 
-`_.repeat(seconds, fn)` runs `fn()` repeatedly, advancing the time cursor by small slices until `seconds` have elapsed. The cursor ends at `start + seconds`. Useful for looping animations without manual `wait()`/`newText()` cycles:
+`_.repeat(count, fn)` calls `fn(i)` `count` times in a row, `i` running `0 .. count-1` (a fractional count is floored). It does **not** touch the time cursor, so the timing comes from the `wait()` calls inside `fn` and the cursor ends wherever the iterations left it:
 
 ```js
-_.repeat(2, () => {
-    _.newText({text: "tick", duration: 0.1});
-    _.wait(0.4);
+_.repeat(3, (i) => {
+    _.newText({text: `tick ${i}`, posY: (i - 1) * 200, duration: 0.5});
+    _.wait(0.5);   // 3 iterations -> cursor ends at 1.5
 });
 ```
+
+`_.repeatGrid(rows, columns, fn)` nests the same loop: `fn(row, column)` runs `rows x columns` times, row by row.
 
 ## Time model
 
@@ -92,7 +95,27 @@ _.clear("ui");                                   // affects every object tagged 
 _.animate("main", {posX: 100});                  // affects every object tagged "main"
 ```
 
-Every id argument - a creator's `id` property or the `id` parameter of `clear()`, `centerText()`, `getEvents()`, `getSize()`, `getCenter()`, `setText()`, `animate()`, `moveTo()`, `recolor()`, `rotateAround()` - accepts a single id or an array of ids. A call affects an object **iff it shares at least one queried id, and each matching object exactly once**; objects that share no queried id are ignored.
+Every id argument - a creator's `id` property or the `id` parameter of `clear()`, `clearAll()`, `centerText()`, `getEvents()`, `getSize()`, `getCenter()`, `setText()`, `animate()`, `moveTo()`, `recolor()`, `rotateAround()` - accepts the same shapes: a single id, an (arbitrarily nested) array of ids, or **a creator's return value as-is** (`[-1]` from most creators, `{id, seg}` from segment-split `newText()`). Nested arrays and results flatten, so values pass around without unpacking:
+
+```js
+const split = _.newText({text: "One; two", segmentSymbol: ";"});
+_.recolor(split, "#FF4040");                     // recolors every segment
+_.clear(split);                                  // clears the whole text
+
+const stack = _.newTexts([{text: "a"}, {text: "b"}]);
+_.clear(stack);                                  // nested arrays flatten
+
+_.newRect({id: split, width: 100});              // one creator's ids seed another object
+```
+
+A call affects an object **iff it shares at least one queried id, and each matching object exactly once**; objects that share no queried id are ignored.
+
+Scope tagging: `id` is a shared default property, so `_.withProp({id: "group"}, fn)` (or `_.setProp({id: "group"})`) tags everything created inside the scope - one `_.clear("group")` removes it all.
+
+Error and geometry rules:
+
+- `animate()`, `moveTo()`, `recolor()`, `rotateAround()`, and `setText()` **throw** on an id that matches nothing, with "did you mean" hints. `clear()`, `centerText()`, `getSize()`, and `getCenter()` only **warn** (clearing an id that does not exist yet can be intentional); `getSize()` / `getCenter()` also warn instead of silently returning a zero box. `_.getIds()` lists every id in use for debugging.
+- `getCenter()`, `getSize()`, `centerText()`, the `posX`/`posY` targets of `moveTo()`, and `rotateAround()`'s default pivot measure only events that have **not ended yet** - an id reused across scenes is not skewed by its dead predecessors. `getEvents()` still returns every matching event.
 
 Every creator accepts a `hold` property that advances the time cursor after the event spawns - equivalent to following the call with `_.wait(hold)`:
 
@@ -116,21 +139,19 @@ _.newCircle({opacity: 0.8});  // per-object override
 ```
 
 ```js
-_.setProp(newProp, type = "text")          // Merge keys into the persistent defaults
-_.changeProp({key: delta}, type = "text")  // Increment numeric defaults; throws on non-numeric
-_.getProp(key, type = "text")              // Get one default property value
-_.getGlobalProp(type = "text")             // Get the full defaults object for a type
-_.saveParam(type = "text")                 // Push a checkpoint of this type's defaults
-_.undoParam(type = "text")                 // Pop the last checkpoint of this type
-_.withProp(newProp, type, fn)              // Scoped defaults: apply, run fn(), restore
-_.withProp({type: newProp, ...}, fn)       // Scoped defaults for multiple types at once
+_.setProp(newProp, type = "global")          // Merge keys into the persistent defaults
+_.changeProp({key: delta}, type = "global")  // Increment numeric defaults; throws on non-numeric
+_.getProp(key, type = "global")              // Get one default property value
+_.getGlobalProp(type = "global")             // Get the full defaults object for a type
+_.withProp(newProp, fn)                      // Scoped defaults: apply, run fn(), restore
+_.withProp(newProp, type, fn)                // Same, for one explicit type
+_.withProp({type: newProp, ...}, fn)         // Scoped defaults for multiple types at once
 ```
 
-- `type` also accepts `"global"` for the eleven shared keys: `_.setProp({opacity: 0.5}, "global")` changes every type that has not set its own `opacity`, and the multi-type form accepts it too (`_.withProp({global: {...}, circle: {...}}, fn)`). `getProp()` reports the effective (inherited) value; `getGlobalProp()` returns the raw object where inherited keys are `undefined`.
+- `type` defaults to `"global"`, which only accepts the eleven shared keys - type-specific properties need an explicit type: `_.setProp({maxWidth: 960}, "text")` (the unknown-key error names the type that owns the key). `"global"` changes every type that has not set its own value, and the multi-type form accepts it too (`_.withProp({global: {...}, circle: {...}}, fn)`). `getProp()` reports the effective (inherited) value; `getGlobalProp()` returns the raw object where inherited keys are `undefined`.
 - Property keys are validated: an unknown key (e.g. `maxwidth`) throws with a "did you mean" suggestion (the `addon` type is the extension point and skips validation). This covers `setProp()`, `changeProp()`, `withProp()`, and every creator.
-- `changeProp()` throws `Nonnumber values are not accepted` if the current value or the delta is not finite. Use `setProp()` for non-numeric properties. `opacity` must remain a finite number from `0` to `1`.
-- Checkpoint stacks are **per type**: `saveParam("circle")` pairs with `undoParam("circle")`, and mixing types cannot pop the wrong checkpoint. `undoParam()` throws when no checkpoint exists for the type.
-- `withProp(newProp, fn)` defaults to `type: "text"`. The snapshot is restored in a `finally` block, even when `fn()` throws:
+- `changeProp()` throws `changeProp(): "posX" must combine finite numbers` if the current value or the delta is not a finite number (a numeric string counts as a mistake). Use `setProp()` for non-numeric properties. `opacity` must remain a finite number from `0` to `1`.
+- `withProp(newProp, fn)` defaults to `type: "global"`; `withProp(newProp, type, fn)` applies one explicit type. Defaults are restored in a `finally` block, even when `fn()` throws:
 
 ```js
 _.withProp({fontSize: 40, fontColor: "#FF6060"}, () => {
@@ -151,13 +172,13 @@ _.withProp({text: {fontSize: 60}, circle: {color: "#FFE040", diameter: 60}}, () 
 // Both text and circle defaults restored here
 ```
 
-  The multi-type form is detected by shape (via `resolvePropEntries()` in `validate.js`): it applies when the object is non-empty, every key names a property type, and every value is an object. So `_.withProp({text: "Hello"}, fn)` is still a single-type text call and `_.withProp(newProp, "circle", fn)` still works. All types are validated **before** any default is changed, so a bad type key throws without leaving earlier types mutated, and a mix of type keys and property names (`{circle: {...}, posY: 100}`) throws instead of being silently misapplied.
+  The multi-type form is detected by shape (via `resolvePropEntries()` in `validate.js`): it applies when the object is non-empty, every key names a property type, and every value is an object. Anything else is a single-type call for `type` (`"global"` unless passed), so `_.withProp({text: "Hello"}, fn)` throws - `text` is not a global key - while `_.withProp(newProp, "circle", fn)` selects the type explicitly. All types are validated **before** any default is changed, so a bad type key throws without leaving earlier types mutated, and a mix of type keys and property names (`{circle: {...}, posY: 100}`) throws instead of being silently misapplied.
 
 ## Text
 
 ```js
 _.newText(newProp)                       // Add a text event; returns the group ids (array)
-_.newTexts(configs)                      // Batch-create text events with automatic vertical spacing; returns array of ids
+_.newTexts(texts, opts = {})             // Batch-create text events with automatic vertical spacing; one id (or {id, seg}) per text
 _.setText(id, text, opts = {})           // Replace text of an existing id with a crossfade
 ```
 
@@ -170,7 +191,7 @@ Adds one text event; see [text.md](./text.md) for the full property table, marku
 Replaces the text of an existing id. `opts.fade` (default `0`) crossfades old text out and new text in; `opts.hold` (default `0`) advances the cursor after the swap:
 
 1. `_.clear(id, fade)` - ends the old event at the current time with `fadeOut = fade`.
-2. Rewinds the cursor by `fade`, then creates a new text event at the rewound time with `fadeIn = fade` (a crossfade), reusing the config stored from the last `_.newText()` call for any of the queried ids. Forces `flashDuration: 0`, `autoSetPosX: false`, `autoSetPosY: false`; all other properties - including `duration` and `fadeOut` - are preserved from the stored config. The replaced text's current tween offsets (`posX`, `posY`, `fontSize`) are baked into the replacement, so a tweened text keeps its position across the swap.
+2. Rewinds the cursor by `fade`, then creates a new text event at the rewound time with `fadeIn = fade` (a crossfade), reusing the config stored from the last `_.newText()` call for any of the queried ids. Forces `flashDuration: 0`, `autoSetPosX: false`, `autoSetPosY: false`; all other properties - including `duration` and `fadeOut` - are preserved from the stored config. The replaced text's current tween offsets (`posX`, `posY`, `fontSize`) are baked into the replacement, so a tweened text keeps its position across the swap. The offsets are the ones currently on screen: a tween reversed back to its start value contributes nothing, and swapping the same text repeatedly keeps the same size instead of growing it.
 3. Re-advances the cursor by `fade`, then advances it by `hold`.
 
 ```js
@@ -192,6 +213,7 @@ _.newRect(newProp)                          // Rectangle centered at (posX, posY
 _.newCircle(newProp)                        // Circle at (posX, posY); arc (< 360) draws a partial circle clockwise from 12 o'clock
 _.newImage(newProp)                         // Image overlay at (posX, posY)
 _.clear(id, fadeOut)                        // End all active events sharing a queried id
+_.clearAll(keepId, fadeOut)                 // End every active event except the ones sharing `keepId`
 _.centerText(id, posX = null, posY = null)  // Reposition a group so its bounding-box center moves to (posX, posY)
 _.getEvents(id)                             // All visual events sharing a queried id (array copy)
 _.getSize(id)                                // Bounding-box size of the group as {width, height}
@@ -200,19 +222,21 @@ _.getCenter(id)                              // Bounding-box center of the group
 
 - All creators accept `duration` (seconds until the event auto-ends) and **return the group's ids**.
 - `setBackgroundColor(color, opts)` accepts `{fadeIn, fadeOut, duration}`: the new color fades in over the previous background, `fadeOut` reverses the fade before the event ends, and a `duration` auto-ends it (the previous color shows again).
-- Every id argument accepts a single id or an array of ids; each call affects every object sharing any queried id exactly once (see [Ids & return values](#ids--return-values)).
+- Every id argument accepts a single id, an array of ids, or a creator's return value; each call affects every object sharing any queried id exactly once (see [Ids & return values](#ids--return-values)).
 - `clear()` sets `end` to the current time on matching events that have not ended yet (`end` stays put on already-finished events); if `fadeOut` is given it overrides the `fadeOut` of those events only. An event that already ended keeps its own `fadeOut`, so a later `clear()` cannot re-time a fade that already happened - a caption replaced by `setText()` keeps its own crossfade.
-- `centerText()` moves each axis independently - an axis is skipped when its argument is `null`. Works for text, rects, circles, lines, and images.
+- `centerText()` moves each axis independently - an axis is skipped when its argument is `null`. Works for text, rects, circles, shapes, lines, and images. Only events that have not ended yet are measured and moved.
 - See [visuals.md](./visuals.md) for property tables, element types, and rendering geometry.
 
 ## Animation
 
 ```js
-_.animate(id, deltas, duration = 1, opts = {})      // Tween property deltas over time
-_.moveTo(id, targets, duration = 1, opts = {})      // Tween properties to absolute target values
-_.recolor(id, color, duration = 1, opts = {})       // Tween every matching event's color
+_.animate(id, deltas, duration = 0, opts = {})      // Tween property deltas over time
+_.moveTo(id, targets, duration = 0, opts = {})      // Tween properties to absolute target values
+_.recolor(id, color, duration = 0, opts = {})       // Tween every matching event's color
 _.rotateAround(id, center, angle, duration = 0, opts = {})  // Sweep the group on an arc around a pivot, spinning with it
 ```
+
+`duration` defaults to `0` in all four, which applies the change instantly - pass the seconds to animate it.
 
 ```js
 const box = _.newCircle({posY: 100, diameter: 60});
@@ -245,26 +269,28 @@ Rules:
 - Elements must exist first: all four throw when no visual events share a queried id.
 - Tweens do not advance the time cursor - `wait()` through them to see them play.
 
-### `_.newTexts(configs)`
+### `_.newTexts(texts, opts = {})`
 
-Batch-create text events from an array of config objects. Each config is passed to `newText()`. When `posY` is omitted, texts stack vertically with `fontSize + lineGap` spacing:
+Batch-create text events from an array of config objects; every entry is passed to `newText()`. `opts` is shared by all entries, may be omitted, and accepts `posY` (where the stack starts, default `0`) plus `textGap` (extra space between stacked texts, default `0`). An entry without its own `posY` is placed below the previous one. Returns one id (or `{id, seg}` for segment-split text) per entry:
 
 ```js
 _.newTexts([
     {text: "Line one"},
-    {text: "Line two", posY: 100},  // explicit position
-    {text: "Line three"}            // auto-positioned below Line two
-]);
+    {text: "Line two", posX: -200},  // explicit position
+    {text: "Line three"}             // auto-positioned below Line two
+], {duration: 1, textGap: 40, posY: -200});
 ```
 
 ### `_.getAutoId()`
 
-Returns the next auto-assigned negative id without consuming it:
+Returns the next auto-assigned negative id without consuming it, so a creator that receives it explicitly keeps it and later auto-assigned ids skip past it:
 
 ```js
 const id = _.getAutoId();   // e.g. -5
 _.newText({id, text: "Pre-assigned"});
 ```
+
+Related helper: `_.getNextId()` returns the same value but **consumes** (reserves) it, so later auto-assigned creators skip that id even when it is not used right away - the safe form when other creators may run in between.
 
 ## Sound & assets
 
@@ -296,11 +322,24 @@ _.getVisualTimeline()  // Visual events array (includes tween events)
 _.getAudioTimeline()   // Audio events array
 _.getDuration()        // Total seconds
 _.getEvents(id)        // Visual events sharing a queried id (excludes tween events)
+_.getIds()             // Every id currently in use (deduped; debugging aid)
 _.getSize(id)           // Bounding-box size of the group {width, height}
 _.getCenter(id)         // Bounding-box center of the group {x, y}
 ```
 
+`getSize()` / `getCenter()` measure only events that have not ended yet; `getEvents()` returns every matching event.
+
 Pass these to `record()` and `addSounds()` - see [recording.md](./recording.md). If you mutate the visual array, keep using the same reference (from `_.getVisualTimeline()`) so the `render.js` cache stays valid.
+
+## Testing & inspection helpers
+
+```js
+_.reset()                     // Clear all global state (tests / single-process iteration)
+_.getTimelineSummary(opts)    // Compact counts + first events (maxEvents, default 50)
+_.validateTimeline()          // {ok, warnings} for zero duration / never-visible / cut-off events
+```
+
+`previewFrames(CONFIG, callerPath, {times, count})` from `Engine/pipeline.js` renders several PNG frames without FFmpeg.
 
 ## Rendering & recording rules
 
@@ -308,5 +347,6 @@ Pass these to `record()` and `addSounds()` - see [recording.md](./recording.md).
 - Draw order stacks active objects by `layoutOrder` ascending (higher draws on top); equal values keep creation order, so the `0` default reproduces exactly the old creation-order stacking. The background always sits behind every object.
 - Tween events (`type: "tween"`) are resolved before drawing each frame: property tweens offset their target object by the tweened properties, color tweens override one event's color.
 - The background is the most recent background event with `start <= t` and `t < end` (defaults to `#000000`). While `fadeIn`/`fadeOut` progress, the active color is alpha-composited over the previous background color. Background events do not use the object `opacity` default.
-- `record()` samples `Math.ceil(FPS * duration)` frames at `t = f / FPS`.
+- `record()` samples `Math.ceil(FPS * duration)` frames at `t = f / FPS`, streaming each frame to FFmpeg as raw RGBA read back with `canvas.toBufferSync("raw")` - several times faster than `getImageData()` on a GPU canvas.
 - `CONFIG` accepts an optional `SCALE` (default `1`, must be a positive finite number) that multiplies the encoded resolution **without changing the composition** - `WIDTH` / `HEIGHT` remain the design space every event is positioned in, while the canvas and `-video_size` are `WIDTH * SCALE x HEIGHT * SCALE` pixels. See [recording.md](./recording.md#resolution).
+- `CONFIG` also accepts `WORKERS` (positive integer or `"auto"`), `PRESET` (x264 preset name) and `CRF` (`0`-`51`) - see [recording.md](./recording.md#parallel-rendering).
